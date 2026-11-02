@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import api from '@/api'
 import { storage } from '@/storage'
 import { keySession } from '@/keySession'
-import { encryptEmail, getPublicCryptoKeyFromPrivate, importPublicKeyBase64, hashPublicKey } from '@/crypto'
+import { encryptEmail, getPublicCryptoKeyFromPrivate, hashPublicKey, sealForRecipient } from '@/crypto'
 import { buildEmail } from '@/lib/emailBuilder'
 import { loadProfile, formatSender } from '@/lib/profile'
 import { utf8ToBase64 } from '@/lib/mime'
@@ -110,8 +110,15 @@ export function useSendEmail({ myEmail, replyData, draftId, onDeleteDraft, onSen
 
       setSendState('fetchingkeys')
       const resolveRes = await api.post('/email/publickeys', { addresses: allRecipients }, { headers })
+      const keyEntries = resolveRes.data.keys ?? []
       const keyMap = Object.fromEntries(
-        (resolveRes.data.keys ?? []).map((k) => [k.address.toLowerCase(), k.public_key])
+        keyEntries.map((k) => [k.address.toLowerCase(), k.public_key])
+      )
+      // Where a recipient also published an ML-KEM key, their copy is sealed to
+      // both halves. A missing key is not a downgrade to hide: there is nothing
+      // to seal to, and the copy says so by being RSA-only.
+      const pqKeyMap = Object.fromEntries(
+        keyEntries.filter((k) => k.pq_public_key).map((k) => [k.address.toLowerCase(), k.pq_public_key])
       )
 
       setSendState('encrypting')
@@ -161,11 +168,14 @@ export function useSendEmail({ myEmail, replyData, draftId, onDeleteDraft, onSen
       const recipientsPayload = {}
       for (const addr of allRecipients) {
         if (sealedAddrs.includes(addr)) continue
-        const recipientKeyB64 = keyMap[addr.toLowerCase()]
+        const lower = addr.toLowerCase()
+        const recipientKeyB64 = keyMap[lower]
         if (recipientKeyB64) {
-          const recipientKey = await importPublicKeyBase64(recipientKeyB64)
-          const { aes_encrypted, data_encrypted } = await encryptEmail(rawEmail, recipientKey)
-          recipientsPayload[addr] = { aes_encrypted, data_encrypted, e2ee: true }
+          recipientsPayload[addr] = await sealForRecipient(
+            rawEmail,
+            { publicKeyBase64: recipientKeyB64, pqPublicKey: pqKeyMap[lower] },
+            lower.split('@')[0],
+          )
         } else {
           recipientsPayload[addr] = { aes_encrypted: '', data_encrypted: utf8ToBase64(rawEmail), e2ee: false }
         }
@@ -208,11 +218,14 @@ export function useSendEmail({ myEmail, replyData, draftId, onDeleteDraft, onSen
           e2ee:        !!keyMap[addr.toLowerCase()],
         })
 
-        const recipientKeyB64 = keyMap[addr.toLowerCase()]
+        const lower = addr.toLowerCase()
+        const recipientKeyB64 = keyMap[lower]
         if (recipientKeyB64) {
-          const recipientKey = await importPublicKeyBase64(recipientKeyB64)
-          const { aes_encrypted, data_encrypted } = await encryptEmail(noticeEmail, recipientKey)
-          recipientsPayload[addr] = { aes_encrypted, data_encrypted, e2ee: true }
+          recipientsPayload[addr] = await sealForRecipient(
+            noticeEmail,
+            { publicKeyBase64: recipientKeyB64, pqPublicKey: pqKeyMap[lower] },
+            lower.split('@')[0],
+          )
         } else {
           recipientsPayload[addr] = { aes_encrypted: '', data_encrypted: utf8ToBase64(noticeEmail), e2ee: false }
         }

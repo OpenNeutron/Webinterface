@@ -519,7 +519,14 @@ export async function decryptEmailBytes(data, messageKey, privateKey, pqSecretKe
     try {
       plainPq = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bodyBuf.slice(0, 12) }, aesKeyPq, bodyBuf.slice(12))
     } catch (err) {
-      const e = new Error('message body failed authentication: the stored data is damaged or truncated')
+      // ML-KEM cannot reject a ciphertext: a wrong secret key decapsulates to a
+      // different shared secret rather than an error. So the only place a
+      // mismatched quantum key can surface is right here, and the honest message
+      // names both possibilities instead of blaming the data.
+      const e = new Error(
+        'message body failed authentication: this copy was sealed for a different ' +
+        'post-quantum key than this account holds, or the stored data is damaged',
+      )
       e.code = 'body_corrupt'
       e.cause = err
       throw e
@@ -569,13 +576,38 @@ export async function decryptEmailBytes(data, messageKey, privateKey, pqSecretKe
     e.cause = err
     throw e
   }
-  return plain
+  return new Uint8Array(plain)
 }
 
 /** Reader-facing wrapper: bytes are for re-sealing, text is for display. */
 export async function decryptEmail(data, messageKey, privateKey, pqSecretKey = null, username = '') {
   const bytes = await decryptEmailBytes(data, messageKey, privateKey, pqSecretKey, username)
   return new TextDecoder().decode(bytes)
+}
+
+/**
+ * Seal one copy for a recipient, using the strongest envelope they published.
+ *
+ * Hybrid where the account has an ML-KEM key, RSA alone where it does not — and
+ * **never a fallback**: if the hybrid envelope fails, the send fails. Quietly
+ * downgrading to RSA would hand the sender a message that says "encrypted" while
+ * the half that survives a quantum computer is gone, and nobody would ever know.
+ */
+export async function sealForRecipient(payload, { publicKeyBase64, pqPublicKey }, recipientUsername) {
+  if (!publicKeyBase64) throw new Error('this recipient published no key to seal to')
+  // A message body is text (attachments travel base64 inside it). Taking either
+  // form here keeps the two paths from disagreeing about what they were handed:
+  // encryptEmail encodes a string, and handing it bytes would encrypt the string
+  // "83,117,98,…" instead of the message.
+  const text = typeof payload === 'string' ? payload : new TextDecoder().decode(payload)
+  if (pqPublicKey) {
+    const bytes = new TextEncoder().encode(text)
+    const { data, messageKey } = await sealHybridPayload(bytes, publicKeyBase64, pqPublicKey, recipientUsername)
+    return { aes_encrypted: messageKey, data_encrypted: data, e2ee: true, hybrid: true }
+  }
+  const rsaKey = await importPublicKeyBase64(publicKeyBase64)
+  const { aes_encrypted, data_encrypted } = await encryptEmail(text, rsaKey)
+  return { aes_encrypted, data_encrypted, e2ee: true, hybrid: false }
 }
 
 /**
