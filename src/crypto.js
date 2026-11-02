@@ -377,9 +377,16 @@ function unwrapKeyEnvelope(bytes) {
 // here is what makes a newer envelope look like garbage to an older client, which
 // then fails with a misleading 'sealed for a different key' — see pqEnvelopeVersion.
 const PQ_PREFIX = [0x53, 0x4c, 0x51]
-const PQ_MAGIC = [...PQ_PREFIX, 0x01]
-export const PQ_ENVELOPE_VERSION = 0x01
+// Version 1 mixed the two shared secrets through HKDF and stopped there. Version 2
+// folds both ciphertexts into the info string as well, so the halves of one message
+// cannot be spliced with the halves of another — the transcript binding X-Wing and
+// RFC 9980 both rely on. Old mail stays readable: version 1 keeps its own derivation.
+export const PQ_ENVELOPE_VERSION_UNBOUND = 0x01
+export const PQ_ENVELOPE_VERSION = 0x02
+const PQ_MAGIC = [...PQ_PREFIX, PQ_ENVELOPE_VERSION]
 const PQ_INFO_SALT = 'sloth-mail/atrest/v1'
+// Domain separator for the version-2 transcript digest.
+const PQ_BINDING_LABEL = 'sloth-mail/atrest/v2/binding'
 
 /** Any sealed-for-a-quantum-key envelope, whichever version sealed it. */
 export function isPqEnvelope(bytes) {
@@ -440,17 +447,39 @@ export async function unwrapSecretBytes(b64, password, serverSalt) {
 }
 
 /** HKDF-SHA256 over both shared secrets, bound to the account name. */
-async function combineHybridKey(rsaSeed, mlkemSecret, username) {
+async function combineHybridKey(rsaSeed, mlkemSecret, username, bind = null) {
   const ikm = new Uint8Array(rsaSeed.length + mlkemSecret.length)
   ikm.set(new Uint8Array(rsaSeed), 0)
   ikm.set(new Uint8Array(mlkemSecret), rsaSeed.length)
   const base = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits'])
+
+  const name = new TextEncoder().encode(username || '')
+  let info = name
+  if (bind) {
+    // The transcript goes into the derivation, not merely alongside it: an attacker
+    // who swaps one ciphertext for another changes the key and the body stops
+    // authenticating, instead of silently opening under a spliced pair.
+    //
+    // Hashed first because WebCrypto caps HKDF `info` at 1024 bytes and the two
+    // ciphertexts together are 1600 — the raw pair does not fit, and a derived key
+    // is the same size either way.
+    const label = new TextEncoder().encode(PQ_BINDING_LABEL)
+    const transcript = new Uint8Array(label.length + bind.rsaCiphertext.length + bind.mlkemCiphertext.length)
+    transcript.set(label, 0)
+    transcript.set(bind.rsaCiphertext, label.length)
+    transcript.set(bind.mlkemCiphertext, label.length + bind.rsaCiphertext.length)
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', transcript))
+    info = new Uint8Array(name.length + digest.length)
+    info.set(name, 0)
+    info.set(digest, name.length)
+  }
+
   const bits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
       hash: 'SHA-256',
       salt: new TextEncoder().encode(PQ_INFO_SALT),
-      info: new TextEncoder().encode(username || ''),
+      info,
     },
     base,
     256,
@@ -478,8 +507,9 @@ export async function decryptEmailBytes(data, messageKey, privateKey, pqSecretKe
 
   const keyBytesRaw = fromB64(messageKey)
   if (isPqEnvelope(keyBytesRaw)) {
-    if (pqEnvelopeVersion(keyBytesRaw) !== PQ_ENVELOPE_VERSION) {
-      throw newerEnvelopeError(pqEnvelopeVersion(keyBytesRaw))
+    const version = pqEnvelopeVersion(keyBytesRaw)
+    if (version !== PQ_ENVELOPE_VERSION && version !== PQ_ENVELOPE_VERSION_UNBOUND) {
+      throw newerEnvelopeError(version)
     }
     if (!pqSecretKey) {
       // Not an error in the message: the session simply has no PQ key loaded,
@@ -512,7 +542,10 @@ export async function decryptEmailBytes(data, messageKey, privateKey, pqSecretKe
       e.cause = err
       throw e
     }
-    const hybridKey = await combineHybridKey(rsaSeed, mlkemSecret, username)
+    // Version 1 derived its key from the secrets alone; version 2 binds the
+    // ciphertexts too, so the derivation has to know which one it is reading.
+    const bind = version === PQ_ENVELOPE_VERSION ? { rsaCiphertext, mlkemCiphertext } : null
+    const hybridKey = await combineHybridKey(rsaSeed, mlkemSecret, username, bind)
     const aesKeyPq = await crypto.subtle.importKey('raw', hybridKey, { name: 'AES-GCM' }, false, ['decrypt'])
     const bodyBuf = fromB64(data)
     let plainPq
@@ -625,7 +658,10 @@ export async function sealHybridPayload(bytes, rsaPublicKeyBase64, pqPublicKeyBa
   const seed = randomBytes(32)
   const rsaCiphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsaPublic, seed))
   const { cipherText, sharedSecret } = ml_kem768.encapsulate(fromB64(pqPublicKeyBase64))
-  const keyBytes = await combineHybridKey(seed, sharedSecret, username)
+  const keyBytes = await combineHybridKey(seed, sharedSecret, username, {
+    rsaCiphertext,
+    mlkemCiphertext: cipherText,
+  })
 
   const iv = randomBytes(12)
   const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt'])

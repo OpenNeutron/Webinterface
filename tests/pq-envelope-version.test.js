@@ -23,9 +23,9 @@ describe('the sealed envelope says which version sealed it', () => {
   })
 
   it('recognises a newer version as a sealed envelope, not as a legacy key', () => {
-    const bytes = envelope(0x02)
+    const bytes = envelope(0x03)
     expect(isPqEnvelope(bytes)).toBe(true)
-    expect(pqEnvelopeVersion(bytes)).toBe(0x02)
+    expect(pqEnvelopeVersion(bytes)).toBe(0x03)
   })
 
   it('treats a bare RSA ciphertext as the legacy envelope, as it must forever', () => {
@@ -43,7 +43,7 @@ describe('an unknown version fails by name, not as a key mismatch', () => {
   const toB64 = (bytes) => Buffer.from(bytes).toString('base64')
   const newer = (() => {
     const bytes = new Uint8Array(6 + 16 + 8)
-    bytes.set([0x53, 0x4c, 0x51, 0x02], 0) // "SLQ" + version 2
+    bytes.set([0x53, 0x4c, 0x51, 0x03], 0) // "SLQ" + version 3: not known to this build
     bytes[4] = 0
     bytes[5] = 16
     return toB64(bytes)
@@ -59,7 +59,7 @@ describe('an unknown version fails by name, not as a key mismatch', () => {
   it('names the newer format for a key envelope too', async () => {
     const { decryptEmailBytes } = await import('@/crypto')
     const keyEnvelope = new Uint8Array(4 + 256)
-    keyEnvelope.set([0x53, 0x4c, 0x4b, 0x02], 0) // "SLK" + version 2
+    keyEnvelope.set([0x53, 0x4c, 0x4b, 0x03], 0) // "SLK" + version 3
     await expect(decryptEmailBytes(body, toB64(keyEnvelope), null, null, 'someone'))
       .rejects.toMatchObject({ code: 'key_envelope_newer_version' })
   })
