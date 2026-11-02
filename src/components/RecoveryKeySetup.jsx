@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { KeyRound, Download, Copy, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { generateRecoveryKey, wrapPrivateKeyWithRecovery, recoveryAuthProof, newRecoverySalt, normalizeRecoveryKey } from '@/lib/recoveryKey'
 import { userSetRecoveryKey } from '@/api'
+import { keySession } from '@/keySession'
 
 /**
  * Shown immediately after an account's key pair is created.
@@ -71,7 +72,10 @@ export default function RecoveryKeySetup({ privateKey, username, onDone }) {
     setError('')
     try {
       const salt = newRecoverySalt()
-      const wrapped = await wrapPrivateKeyWithRecovery(privateKey, recoveryKey, salt)
+      // Both halves or the recovery is a half-recovery: an account restored without
+      // the ML-KEM secret cannot open any message sealed since quantum protection.
+      const pqSecret = keySession.getPq()
+      const wrapped = await wrapPrivateKeyWithRecovery(privateKey, recoveryKey, salt, pqSecret)
       const proof = await recoveryAuthProof(recoveryKey)
       await userSetRecoveryKey(wrapped, salt, proof)
       onDone()

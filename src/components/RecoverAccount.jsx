@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { hashPassword, encryptPrivateKey } from '@/crypto'
-import { unwrapPrivateKeyWithRecovery, recoveryAuthProof } from '@/lib/recoveryKey'
+import { unwrapRecoveryBundle, recoveryAuthProof } from '@/lib/recoveryKey'
+import { wrapSecretBytes } from '@/crypto'
 import { userFetchRecoveryBlob, userRestoreWithRecoveryKey } from '@/api'
 import AuthShell from '@/components/AuthShell'
 import { cryptoUnavailableMessage, isCryptoUnavailable } from '@/lib/cryptoFailure'
@@ -19,10 +20,19 @@ export default function RecoverAccount() {
   const [secret, setSecret] = useState('')
   const [bundle, setBundle] = useState(null)
   const [recoveredKey, setRecoveredKey] = useState(null)
+  // null when the blob predates quantum protection; the done screen says so.
+  const [recoveredPq, setRecoveredPq] = useState(null)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  const b64ToBytes = (text) => {
+    const binary = atob(text)
+    const out = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i)
+    return out
+  }
 
   const fail = (err, fallback) => {
     setError(
@@ -52,8 +62,9 @@ export default function RecoverAccount() {
     setError('')
     setBusy(true)
     try {
-      const key = await unwrapPrivateKeyWithRecovery(bundle.wrapped_key, secret, bundle.kdf_salt)
-      setRecoveredKey(key)
+      const opened = await unwrapRecoveryBundle(bundle.wrapped_key, secret, bundle.kdf_salt)
+      setRecoveredKey(opened.privateKey)
+      setRecoveredPq(opened.pqSecret)
       setStep('password')
       setBusy(false)
     } catch (err) {
@@ -76,6 +87,11 @@ export default function RecoverAccount() {
     try {
       const credentials = await hashPassword(password)
       const wrapped = await encryptPrivateKey(recoveredKey, password, bundle.account_salt)
+      // Re-wrap the quantum secret under the new password, or it stays locked behind
+      // a password that no longer exists.
+      const wrappedPq = recoveredPq
+        ? await wrapSecretBytes(b64ToBytes(recoveredPq), password, bundle.kdf_salt)
+        : null
       const proof = await recoveryAuthProof(secret)
       await userRestoreWithRecoveryKey({
         username: username.trim().toLowerCase(),
@@ -83,6 +99,7 @@ export default function RecoverAccount() {
         credentials,
         wrapped_key: wrapped,
         kdf_salt: bundle.account_salt,
+        ...(wrappedPq ? { wrapped_pq_key: wrappedPq } : {}),
       })
       setStep('done')
     } catch (err) {
@@ -206,6 +223,14 @@ export default function RecoverAccount() {
             </p>
             <p className="text-xs text-foreground/50">
               That recovery key is now spent. After you sign in, create a new one.
+            {recoveredPq === null && (
+              <span className="mt-2 block text-[12px] text-sand">
+                This recovery key was made before quantum protection existed, so it restored your
+                password and your key but not the extra quantum half. Messages sealed with that half
+                will not open. After you sign in, turn post-quantum protection on again in Settings —
+                that creates a fresh key, and from then on your recovery key covers both.
+              </span>
+            )}
             </p>
             <Link to="/login" className="inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
               Go to sign in

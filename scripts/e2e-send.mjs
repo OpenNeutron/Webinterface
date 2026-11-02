@@ -26,9 +26,9 @@ const accounts = Object.fromEntries(
     .map((line) => line.split(':')),
 )
 
-const FROM = 'qatester'
-const TO = 'qatester2@slothlee.xyz'
-const SUBJECT = `kt e2e ${new Date().toISOString()}`
+const FROM = process.env.QA_FROM || 'qatester'
+const TO = process.env.QA_TO || 'qatester2@slothlee.xyz'
+const SUBJECT = process.env.QA_SUBJECT || `kt e2e ${new Date().toISOString()}`
 const BODY = 'checking the directory before sealing this'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -58,7 +58,16 @@ try {
   await page.evaluate(() => {
     Array.from(document.querySelectorAll('button')).find((b) => /sign in|log in|continue/i.test(b.textContent || ''))?.click()
   })
-  await page.waitForFunction(() => /inbox/i.test(document.body.innerText), { timeout: 90000 })
+  try {
+    // Wait on the route, not on words: the compose button lives in the sidebar, which a
+    // phone hides behind the nav drawer, and the word "Inbox" only appears in the empty
+    // state. Both made this look like a failed sign-in on a perfectly good session.
+    await page.waitForFunction(() => !/\/login/.test(location.pathname), { timeout: 90000 })
+    await sleep(2500)
+  } catch {
+    record('sign-in did not reach the mailbox; page says: ' + (await page.evaluate(() => document.body.innerText.slice(0, 200).replace(/\n/g, ' | '))))
+    throw new Error('sign-in failed')
+  }
   await sleep(1200)
   record('signed in')
 

@@ -149,7 +149,7 @@ export async function recoveryAuthProof(input) {
   return toHex(digest)
 }
 
-async function deriveWrappingMaterial(secret, saltHex) {
+export async function deriveWrappingMaterial(secret, saltHex) {
   const saltBytes = hexToBytes(saltHex)
   const material = await argon2id({
     password: secret,
@@ -178,18 +178,35 @@ export async function importPrivateKeyPkcs8(pkcs8Bytes) {
   return crypto.subtle.importKey('pkcs8', pkcs8Bytes, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['decrypt'])
 }
 
-/** Wrap an existing private key under a recovery key. */
-export async function wrapPrivateKeyWithRecovery(privateKey, recoveryKeyText, saltHex) {
+/**
+ * Wrap an existing private key under a recovery key.
+ *
+ * Version 2 carries the ML-KEM secret as well. Recovery used to restore the RSA key
+ * alone, which meant a recovered account could sign in, read plaintext-era mail, and
+ * fail on every message sealed with the quantum half — the exact mail a new account
+ * receives. The secret travels in the same blob, under the same recovery key.
+ */
+export async function wrapPrivateKeyWithRecovery(privateKey, recoveryKeyText, saltHex, pqSecretB64 = null) {
   const { secret } = await parseRecoveryKey(recoveryKeyText)
   const { keyBytes, iv } = await deriveWrappingMaterial(secret, saltHex)
   const pkcs8 = await exportPkcs8(privateKey)
+  const payload = JSON.stringify({
+    v: 2,
+    rsa: toB64(pkcs8),
+    pq: pqSecretB64 || null,
+  })
   const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt'])
-  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, pkcs8)
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, new TextEncoder().encode(payload))
   return toB64(new Uint8Array(cipher))
 }
 
-/** Unwrap the stored private key with a recovery key. */
-export async function unwrapPrivateKeyWithRecovery(blobB64, recoveryKeyText, saltHex) {
+/**
+ * Unwrap a recovery blob into both halves.
+ *
+ * A version-1 blob is the raw PKCS#8 key from before this change: it opens, and it has
+ * no quantum half. The caller is expected to say so instead of pretending otherwise.
+ */
+export async function unwrapRecoveryBundle(blobB64, recoveryKeyText, saltHex) {
   const { secret } = await parseRecoveryKey(recoveryKeyText)
   const { keyBytes, iv } = await deriveWrappingMaterial(secret, saltHex)
   const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt'])
@@ -201,7 +218,30 @@ export async function unwrapPrivateKeyWithRecovery(blobB64, recoveryKeyText, sal
     // does not belong to this account.
     throw new Error('That recovery key does not unlock this account')
   }
-  return importPrivateKeyPkcs8(new Uint8Array(plain))
+  const bytes = new Uint8Array(plain)
+
+  let payload = null
+  try {
+    const maybe = JSON.parse(new TextDecoder().decode(bytes))
+    if (maybe && maybe.v === 2 && typeof maybe.rsa === 'string') payload = maybe
+  } catch {
+    /* not JSON: a version-1 blob, handled below */
+  }
+
+  if (!payload) {
+    return { privateKey: await importPrivateKeyPkcs8(bytes), pqSecret: null, version: 1 }
+  }
+  return {
+    privateKey: await importPrivateKeyPkcs8(fromB64(payload.rsa)),
+    pqSecret: payload.pq || null,
+    version: 2,
+  }
+}
+
+/** Kept for callers that only need the RSA key. */
+export async function unwrapPrivateKeyWithRecovery(blobB64, recoveryKeyText, saltHex) {
+  const bundle = await unwrapRecoveryBundle(blobB64, recoveryKeyText, saltHex)
+  return bundle.privateKey
 }
 
 export const _internals = { sha256, toHex, fromB64, toB64, SECRET_BYTES, CHECK_BYTES }
