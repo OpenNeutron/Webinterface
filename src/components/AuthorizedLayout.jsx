@@ -523,7 +523,7 @@ const AuthorizedLayout = () => {
           />
           <SetupStrip
             items={setupDismissed ? [] : setupGaps}
-            onOpen={() => navigate('/settings')}
+            onOpen={(href) => navigate(href || '/settings')}
             onDismiss={dismissSetup}
           />
           <div

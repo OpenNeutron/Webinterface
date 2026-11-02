@@ -43,7 +43,7 @@ export default function SetupStrip({ items, onOpen, onDismiss }) {
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <button
             type="button"
-            onClick={onOpen}
+            onClick={() => onOpen(items[0]?.href)}
             className="rounded-md px-2 py-1 text-[11.5px] font-medium text-sand transition-colors duration-120 hover:bg-sand/10 max-sm:min-h-11 max-sm:px-2.5"
           >
             Set up
