@@ -90,7 +90,10 @@ export default function RecoverAccount() {
       // Re-wrap the quantum secret under the new password, or it stays locked behind
       // a password that no longer exists.
       const wrappedPq = recoveredPq
-        ? await wrapSecretBytes(b64ToBytes(recoveredPq), password, bundle.kdf_salt)
+        // The ACCOUNT salt, not the recovery salt: the quantum secret is unwrapped at
+        // login with the account salt, and wrapping it with the other one produced a
+        // secret nothing could open — the failure looked exactly like a corrupt key.
+        ? await wrapSecretBytes(b64ToBytes(recoveredPq), password, bundle.account_salt)
         : null
       const proof = await recoveryAuthProof(secret)
       await userRestoreWithRecoveryKey({
