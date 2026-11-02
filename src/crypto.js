@@ -340,7 +340,9 @@ export async function encryptEmail(plaintext, publicKey) {
 // The AES key for each message is stored wrapped to the recipient's public key.
 // That blob is the thing a future algorithm change has to replace, so it now
 // carries its own version. Old blobs have no prefix and stay readable forever.
-const KEY_ENVELOPE_MAGIC = [0x53, 0x4c, 0x4b, 0x01] // "SLK" + version 1
+// "SLK" carries the format, the fourth byte is its version.
+const KEY_ENVELOPE_PREFIX = [0x53, 0x4c, 0x4b]
+const KEY_ENVELOPE_MAGIC = [...KEY_ENVELOPE_PREFIX, 0x01]
 
 function wrapKeyEnvelope(cipherBytes) {
   const out = new Uint8Array(cipherBytes.length + KEY_ENVELOPE_MAGIC.length)
@@ -350,9 +352,12 @@ function wrapKeyEnvelope(cipherBytes) {
 }
 
 function unwrapKeyEnvelope(bytes) {
-  for (let i = 0; i < KEY_ENVELOPE_MAGIC.length; i++) {
-    if (bytes[i] !== KEY_ENVELOPE_MAGIC[i]) return { version: 0, cipher: bytes }
-  }
+  // A blob with no "SLK" is a bare RSA ciphertext from before the envelope existed;
+  // that path stays readable forever.
+  if (!KEY_ENVELOPE_PREFIX.every((b, i) => bytes[i] === b)) return { version: 0, cipher: bytes }
+  // It IS an envelope. A version above 1 was written by a newer build: unwrapping it
+  // as version 1 would silently produce the wrong bytes and blame the account's key.
+  if (bytes[3] !== 0x01) throw newerEnvelopeError(bytes[3], 'key')
   return { version: 1, cipher: bytes.slice(KEY_ENVELOPE_MAGIC.length) }
 }
 
@@ -368,11 +373,37 @@ function unwrapKeyEnvelope(bytes) {
 // No prefix at all still means "before this existed", which is why old mail keeps
 // opening forever — it can never be re-created, only re-encrypted deliberately.
 
-const PQ_MAGIC = [0x53, 0x4c, 0x51, 0x01]
+// "SLQ" carries the format, the fourth byte is its version. Matching the version
+// here is what makes a newer envelope look like garbage to an older client, which
+// then fails with a misleading 'sealed for a different key' — see pqEnvelopeVersion.
+const PQ_PREFIX = [0x53, 0x4c, 0x51]
+const PQ_MAGIC = [...PQ_PREFIX, 0x01]
+export const PQ_ENVELOPE_VERSION = 0x01
 const PQ_INFO_SALT = 'sloth-mail/atrest/v1'
 
+/** Any sealed-for-a-quantum-key envelope, whichever version sealed it. */
 export function isPqEnvelope(bytes) {
-  return bytes.length > 6 && PQ_MAGIC.every((b, i) => bytes[i] === b)
+  return bytes.length > 6 && PQ_PREFIX.every((b, i) => bytes[i] === b)
+}
+
+/** The version byte of a quantum envelope, or null when this is not one. */
+export function pqEnvelopeVersion(bytes) {
+  return isPqEnvelope(bytes) ? bytes[3] : null
+}
+
+/**
+ * A version this client does not know must say so. Falling through to the RSA
+ * path would report 'sealed for a different key than this account holds' about a
+ * message that is perfectly intact, sent to this very account, by a newer build.
+ */
+function newerEnvelopeError(version, surface = 'message') {
+  const what = surface === 'key' ? 'This message key is sealed' : 'This message is sealed'
+  const e = new Error(
+    `${what} in a newer format (version ${version}) than this app understands. ` +
+    'Update the app to open it — the message itself is intact.',
+  )
+  e.code = surface === 'key' ? 'key_envelope_newer_version' : 'pq_newer_version'
+  return e
 }
 
 function parsePqEnvelope(bytes) {
@@ -447,6 +478,9 @@ export async function decryptEmailBytes(data, messageKey, privateKey, pqSecretKe
 
   const keyBytesRaw = fromB64(messageKey)
   if (isPqEnvelope(keyBytesRaw)) {
+    if (pqEnvelopeVersion(keyBytesRaw) !== PQ_ENVELOPE_VERSION) {
+      throw newerEnvelopeError(pqEnvelopeVersion(keyBytesRaw))
+    }
     if (!pqSecretKey) {
       // Not an error in the message: the session simply has no PQ key loaded,
       // which is what a cached bundle or a half-finished login looks like.
