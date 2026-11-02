@@ -44,14 +44,27 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 412, height: 760 },
 })
 
+let page
 try {
-  const page = await browser.newPage()
+  page = await browser.newPage()
   page.on('console', (msg) => {
     const text = msg.text()
     if (/kt |transparency|proof|verify|refus/i.test(text)) record(`console: ${text}`)
   })
 
   await page.goto('https://mail.slothlee.xyz/login', { waitUntil: 'networkidle2', timeout: 60000 })
+
+  // Optionally plant a key-transparency head this browser "saw" earlier, so a send has to
+  // prove the directory still extends it. Without this the harness always looks like a
+  // brand-new browser, which is the one case where no proof is required.
+  if (process.env.QA_KT_PIN_SIZE && process.env.QA_KT_PIN_ROOT) {
+    await page.evaluate(
+      (value) => localStorage.setItem('sloth.kt.head', JSON.stringify(value)),
+      { size: Number(process.env.QA_KT_PIN_SIZE), root: process.env.QA_KT_PIN_ROOT },
+    )
+    record(`pinned head: size ${process.env.QA_KT_PIN_SIZE}`)
+  }
+
   const fields = await page.$$('input')
   await fields[0].type(FROM)
   await fields[1].type(accounts[FROM])
@@ -113,6 +126,15 @@ try {
   if (refusal) record(`REFUSED: ${refusal}`)
 
   await page.screenshot({ path: process.env.QA_SHOT || '/tmp/e2e-after-send.png' })
+  // A refusal is a result too: when asked, capture what the panel says after Send.
+  if (process.env.QA_DUMP_TEXT) {
+    try {
+      const text = await page.evaluate(() => document.body.innerText.replace(/\n+/g, ' | '))
+      log.push('page after send: ' + text.slice(0, 500))
+    } catch (err) {
+      log.push('page after send: could not read the page (' + err.message + ')')
+    }
+  }
   appendFileSync(process.env.QA_LOG || '/tmp/e2e-send.log', `${log.join('\n')}\nSUBJECT ${SUBJECT}\n---\n`)
   console.log(`SUBJECT ${SUBJECT}`)
 } catch (error) {
