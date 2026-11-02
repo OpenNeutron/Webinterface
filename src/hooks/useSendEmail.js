@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import api from '@/api'
-import { verifyProof, pinHead, pinnedHead, headRegressed } from '@/kt'
+import { verifyProof, pinHead, pinnedHead, headRegressed, verifyHeadExtension } from '@/kt'
 import { storage } from '@/storage'
 import { keySession } from '@/keySession'
 import { encryptEmail, getPublicCryptoKeyFromPrivate, hashPublicKey, sealForRecipient } from '@/crypto'
@@ -153,7 +153,24 @@ export function useSendEmail({ myEmail, replyData, draftId, onDeleteDraft, onSen
         setSendState('error')
         return
       }
-      if (sawHead) pinHead(sawHead)
+      // A bigger tree has to prove it still contains the one this browser pinned. Without
+      // this, a server could rewrite an old key and grow past it, and every send would look
+      // normal: bigger is what a rewritten history looks like from the outside.
+      if (sawHead) {
+        const extension = await verifyHeadExtension(sawHead, pinned, async (first, second) => {
+          const res = await api.post('/kt/consistency', { first, second })
+          return res?.data ?? res
+        })
+        if (!extension.ok) {
+          setSendError(
+            'The key directory could not show that it still contains the history this browser ' +
+              `saw (${extension.reason}). Nothing was sent. Check from a device that saw it before.`
+          )
+          setSendState('error')
+          return
+        }
+        pinHead(sawHead)
+      }
 
       setSendState('encrypting')
 
