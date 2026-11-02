@@ -24,7 +24,10 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Uppercase names are components, and a component used only as <Icon /> is used.
+      // The vars pattern already said so; destructured parameters were not covered, and
+      // that false positive is what convinced someone to delete a live binding.
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^[A-Z_]' }],
     },
   },
   {
