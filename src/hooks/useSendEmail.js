@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import api from '@/api'
+import { verifyProof, pinHead, pinnedHead, headRegressed } from '@/kt'
 import { storage } from '@/storage'
 import { keySession } from '@/keySession'
 import { encryptEmail, getPublicCryptoKeyFromPrivate, hashPublicKey, sealForRecipient } from '@/crypto'
@@ -120,6 +121,39 @@ export function useSendEmail({ myEmail, replyData, draftId, onDeleteDraft, onSen
       const pqKeyMap = Object.fromEntries(
         keyEntries.filter((k) => k.pq_public_key).map((k) => [k.address.toLowerCase(), k.pq_public_key])
       )
+
+      // Check the directory before believing it. Every key arrives with a leaf and an
+      // audit path into a signed root; a key the server could substitute is a key the
+      // server could read. An entry with a key but no valid proof is refused rather
+      // than sealed to — silently sending anyway is the failure this exists to stop.
+      const unproven = []
+      let sawHead = null
+      for (const entry of keyEntries) {
+        if (!entry.public_key) continue
+        const check = verifyProof(entry.proof)
+        if (!check.ok) {
+          unproven.push(`${entry.address} (${check.reason})`)
+          continue
+        }
+        sawHead = entry.proof.head
+      }
+      if (unproven.length > 0) {
+        setSendError(
+          `Could not verify whose key this is: ${unproven.join(', ')}. Nothing was sent.`
+        )
+        setSendState('error')
+        return
+      }
+      const pinned = pinnedHead()
+      if (sawHead && headRegressed(sawHead, pinned)) {
+        setSendError(
+          'The key directory this browser saw before is gone: the server is showing a shorter ' +
+          'or rewritten history. Nothing was sent. Check from a device that saw the earlier one.'
+        )
+        setSendState('error')
+        return
+      }
+      if (sawHead) pinHead(sawHead)
 
       setSendState('encrypting')
 
