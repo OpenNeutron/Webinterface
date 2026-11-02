@@ -360,7 +360,7 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
     }
     setPgpError('')
     if (!hasIdentity()) {
-      setPgpError('Create your OpenPGP key first — lock icon in the top bar')
+      setPgpError('Create your OpenPGP key first — Settings → OpenPGP')
       return
     }
     if (!coverage.canEncrypt) {

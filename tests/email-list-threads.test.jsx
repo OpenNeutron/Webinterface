@@ -3,9 +3,16 @@ import { render, screen, fireEvent } from '@testing-library/react'
 
 // The row component is irrelevant here; this test is about the list's own
 // threading render, which crashed the whole pane when a state hook was missing.
-vi.mock('@/components/email/EmailListItem', () => ({
-  EmailListItem: ({ uid, preview }) => <div data-testid="mail-row">{uid}:{preview?.subject}</div>,
-}))
+// Partial mock: EmailList also imports `dayBucket` from this module to group rows by
+// day, and a mock that replaced the whole module made that import undefined — the list
+// then failed at render with "No dayBucket export", which reads like a product crash.
+vi.mock('@/components/email/EmailListItem', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    EmailListItem: ({ uid, preview }) => <div data-testid="mail-row">{uid}:{preview?.subject}</div>,
+  }
+})
 
 import EmailList from '@/components/EmailList'
 

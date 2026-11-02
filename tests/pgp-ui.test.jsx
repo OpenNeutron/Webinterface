@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { PgpModal } from '@/components/PgpModal'
+import KeysSection from '@/components/KeysSection'
 import { PgpBody } from '@/components/email/PgpBody'
 import { generateIdentity, encryptBody, loadRing } from '@/pgp'
 
@@ -11,10 +11,13 @@ beforeEach(() => {
   localStorage.clear()
 })
 
+// Key creation moved out of a modal and into Settings → OpenPGP (`KeysSection`) when
+// Settings became a page. The section opens straight into the create form when this
+// browser has no key, so the same three fields are still the ones a person types.
 describe('OpenPGP key management', () => {
-  it('creates a key from the modal and lists it', async () => {
+  it('creates a key from settings and lists it', async () => {
     const user = userEvent.setup()
-    render(<PgpModal isOpen onClose={() => {}} accountEmail="tibs@slothlee.xyz" />)
+    render(<KeysSection accountEmail="tibs@slothlee.xyz" />)
 
     // The address is prefilled from the account, the rest is typed.
     await user.type(screen.getByPlaceholderText('Sam Smith'), 'Tibs')
@@ -28,12 +31,12 @@ describe('OpenPGP key management', () => {
       { timeout: 25000 },
     )
     expect(loadRing().identity.fingerprint).toMatch(/^[0-9A-F]{40}$/)
-    expect(screen.getAllByText(/correspondents \(1\)/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/tibs@slothlee\.xyz/).length).toBeGreaterThan(0)
   }, 30000)
 
   it('refuses a passphrase that is too short', async () => {
     const user = userEvent.setup()
-    render(<PgpModal isOpen onClose={() => {}} accountEmail="tibs@slothlee.xyz" />)
+    render(<KeysSection accountEmail="tibs@slothlee.xyz" />)
 
     await user.type(screen.getByPlaceholderText('Sam Smith'), 'Tibs')
     await user.type(screen.getByPlaceholderText('At least 8 characters'), 'short')
@@ -148,7 +151,7 @@ describe('OpenPGP file picker', () => {
     localStorage.clear()
 
     const user = userEvent.setup()
-    const { container } = render(<PgpModal isOpen onClose={() => {}} accountEmail="tibs@slothlee.xyz" />)
+    const { container } = render(<KeysSection accountEmail="tibs@slothlee.xyz" />)
     const input = container.querySelector('input[type="file"]')
     expect(input).toBeTruthy()
 

@@ -8,7 +8,7 @@
  */
 // Bump on every deploy: a shell cached under an old name is how a phone keeps
 // running last week's reader while the server serves this week's.
-const CACHE = 'sloth-mail-shell-v82'
+const CACHE = 'sloth-mail-shell-v83'
 const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/favicon.svg']
 
 self.addEventListener('install', (event) => {
