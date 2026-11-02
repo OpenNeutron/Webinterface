@@ -217,7 +217,13 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
       if (!coverage.canEncrypt) {
         return { tone: 'warn', text: `OpenPGP: no key for ${coverage.missing.join(', ')}` }
       }
-      return { tone: 'good', text: `OpenPGP to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'}` }
+      // OpenPGP here is classical: RFC 9980 defines hybrid composites for it, but no
+      // browser library implements the v6 key layer yet, so the honest line says so.
+      // Account-to-account mail is different — that path is sealed and says "sealed".
+      return {
+        tone: 'good',
+        text: `OpenPGP to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'} — classical keys, not quantum-protected`,
+      }
     }
 
     // A sealed recipient gets no message at all — only a link — so neither the
