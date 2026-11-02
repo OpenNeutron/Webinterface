@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
 import SlothMark from '@/components/SlothMark'
+import { storage } from '@/storage'
 import { useEffect, useState } from 'react'
 import {
   Inbox,
@@ -64,6 +65,16 @@ const Sidebar = ({
     }
   }, [])
 
+  // Read once: the flag cannot change without a fresh session, and re-reading it on every
+  // render would put localStorage in the render path.
+  const [showBuildStamp] = useState(() => {
+    try {
+      return storage.getIsAdmin() === true
+    } catch {
+      return false
+    }
+  })
+
   const inboxUnread = uids.filter((uid) => emailMeta[uid]?.unread !== false).length
   const starredCount = uids.filter((uid) => emailMeta[uid]?.starred).length
 
@@ -121,7 +132,7 @@ const Sidebar = ({
       </div>
 
       <nav className="space-y-0.5 px-2.5" aria-label="Folders">
-        {DEFAULT_FOLDERS.map(({ id, icon: Icon, label }) => {
+        {DEFAULT_FOLDERS.map(({ id, label }) => {
           const badge = getBadge(id)
           const isActive = selectedFolder === id
           return (
@@ -231,11 +242,14 @@ const Sidebar = ({
           <Settings className="size-4 shrink-0 text-ink-3" />
           <span>Settings</span>
         </button>
-        {/* The build this screen is running, and the viewport the browser gave it.
-            Both questions cost a round of "nothing has changed" to answer. */}
-        <p className="mono mt-1.5 px-1.5 text-[10px] leading-tight text-ink-3/70">
-          {__BUILD_ID__} · {viewport}
-        </p>
+        {/* The build this screen is running, and the viewport the browser gave it:
+            both questions cost a round of "nothing has changed" to answer. Staff only —
+            a customer paying for a mailbox should not read a commit hash under Settings. */}
+        {showBuildStamp && (
+          <p className="mono mt-1.5 px-1.5 text-[10px] leading-tight text-ink-3/70">
+            {__BUILD_ID__} · {viewport}
+          </p>
+        )}
       </div>
     </div>
   )
