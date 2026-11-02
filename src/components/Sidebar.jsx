@@ -132,7 +132,7 @@ const Sidebar = ({
       </div>
 
       <nav className="space-y-0.5 px-2.5" aria-label="Folders">
-        {DEFAULT_FOLDERS.map(({ id, label }) => {
+        {DEFAULT_FOLDERS.map(({ id, icon: Icon, label }) => {
           const badge = getBadge(id)
           const isActive = selectedFolder === id
           return (
