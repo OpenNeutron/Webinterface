@@ -15,6 +15,8 @@ export function useEmailFetch() {
   const [hasMore, setHasMore] = useState(true)
   const [offset, setOffset] = useState(0)
   const isFetchingRef = useRef(false)
+  const uidsRef = useRef(uids)
+  uidsRef.current = uids
 
   /** Previews for received messages by uid — the inbox page, or messages in the trash. */
   const fetchPreviewsFor = useCallback(async (list) => {
@@ -115,5 +117,53 @@ export function useEmailFetch() {
     fetchEmails(next)
   }
 
-  return { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore, fetchPreviewsFor }
+  /**
+   * Start over from the newest page. Refresh used to call fetchEmails(0) and leave `offset`
+   * where Load older mail had moved it, so the next Load older mail skipped a page.
+   */
+  const reload = useCallback(async () => {
+    setOffset(0)
+    await fetchEmails(0)
+  }, [fetchEmails])
+
+  /**
+   * New mail, without disturbing the list: asks for the newest page, adds only what was not
+   * already here (and decrypts only those), and keeps everything else — older pages loaded with
+   * Load older mail included. Cheap enough to run on a timer and whenever the app comes back.
+   * Returns how many arrived.
+   */
+  const checkNew = useCallback(async () => {
+    if (isFetchingRef.current) return 0
+    isFetchingRef.current = true
+    try {
+      const res = await api.post(
+        '/email/recent',
+        { offset: 0, limit: LIMIT },
+        { headers: { Authorization: `Bearer ${storage.getToken()}` } },
+      )
+      const newest = (res.data?.uids ?? []).map(String)
+      // Read from the ref, not inside the state updater: React runs updaters later, at render,
+      // so a value computed in one is not there yet on the next line.
+      const known = new Set(uidsRef.current.map(String))
+      const arrived = newest.filter((uid) => !known.has(uid))
+      if (arrived.length) {
+        const top = new Set(newest)
+        // The newest page in the server's order, then everything already on screen.
+        setUids((prev) => [...newest, ...prev.filter((uid) => !top.has(String(uid)))])
+      }
+      if (arrived.length) {
+        // The list grew at the top, so the next older page starts further down.
+        setOffset((prev) => prev + arrived.length)
+        await fetchPreviewsFor(arrived)
+      }
+      return arrived.length
+    } catch {
+      // silent by design: a missed check is caught by the next one, and Refresh says more.
+      return 0
+    } finally {
+      isFetchingRef.current = false
+    }
+  }, [fetchPreviewsFor])
+
+  return { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore, fetchPreviewsFor, reload, checkNew }
 }

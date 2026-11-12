@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Minus, Trash2 } from 'lucide-react'
+import { ArrowDown, Check, ChevronDown, ChevronRight, Minus, RefreshCw, Trash2 } from 'lucide-react'
 import EmptyArt from '@/components/EmptyArt'
 import { EmailListItem, EmailRowSkeleton, dayBucket, rowTime } from '@/components/email/EmailListItem'
 import { buildThreads } from '@/lib/threads'
 import { SenderAvatar } from '@/components/SenderAvatar'
 import { SwipeRow } from '@/components/email/SwipeRow'
+import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 
 const EmailList = ({
   searchQuery = '',
@@ -34,7 +35,11 @@ const EmailList = ({
   groups,
   folderLabel,
   selectedFolder,
+  // Pull down from the top of the list to refresh (touch screens).
+  onRefresh = null,
 }) => {
+  const scroller = useRef(null)
+  const { pull, busy, ready } = usePullToRefresh(scroller, onRefresh)
   // Which conversation rows are open. Keyed by thread key, not uid.
   const [expandedThreads, setExpandedThreads] = useState(() => new Set())
 
@@ -128,8 +133,29 @@ const EmailList = ({
   }, [threads, loading])
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="custom-scrollbar flex-1 overflow-y-auto">
+    <div className="relative flex h-full flex-col bg-background">
+      {(pull > 0 || busy) && (
+        <div
+          data-testid="pull-indicator"
+          aria-live="polite"
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center"
+          style={{ transform: `translateY(${Math.max(0, pull - 40)}px)` }}
+        >
+          <span className="mt-2 flex items-center gap-1.5 rounded-full border border-line bg-card px-3 py-1.5 text-[12px] text-ink-2 shadow-sm">
+            {busy
+              ? <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+              : <ArrowDown className={`size-3.5 transition-transform duration-120 ${ready ? 'rotate-180' : ''}`} aria-hidden="true" />}
+            {busy ? 'Checking for mail…' : ready ? 'Release to refresh' : 'Pull to refresh'}
+          </span>
+        </div>
+      )}
+      {/* overscroll-contain: the browser's own pull-to-refresh reloads the whole app, which
+          throws away the unlocked key and asks for the password again. */}
+      <div
+        ref={scroller}
+        className="custom-scrollbar flex-1 overflow-y-auto overscroll-y-contain"
+        style={pull ? { transform: `translateY(${pull * 0.5}px)` } : undefined}
+      >
         <div className="mx-auto w-full max-w-[1040px]">
         {showSkeleton && (
           <div>
