@@ -16,6 +16,7 @@ import { EmailToolbar } from '@/components/EmailToolbar'
 import { useEmailFetch } from '@/hooks/useEmailFetch'
 import { useSentEmails } from '@/hooks/useSentEmails'
 import { useTrash } from '@/hooks/useTrash'
+import { listShortcut, neighbourAfterRemoval, stepThrough } from '@/lib/mailNav'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { useGroupActions } from '@/hooks/useGroupActions'
 import { keySession } from '@/keySession'
@@ -108,7 +109,7 @@ const AuthorizedLayout = () => {
     if (sent.length) await fetchSentPreviews(sent)
   }, [fetchEmails, fetchSentUids, fetchSentPreviews])
   const trash = useTrash({ fetchPreviewsFor, fetchSentPreviews, setPreviews, onRestored: reloadFolders })
-  const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, moveToGroup, removeFromGroup } = useEmailActions({
+  const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoLast, moveToGroup, removeFromGroup } = useEmailActions({
     emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups, setSentUids,
     onTrashed: trash.addTrashed,
     onRestored: async (back) => {
@@ -318,18 +319,49 @@ const AuthorizedLayout = () => {
     })
   }
 
+  // After the open message is deleted, the next one opens — on a screen wide enough to show
+  // the list and the message side by side. On a phone the reader is the whole screen, and
+  // going back to the list is what people expect there.
+  // The rows in the order they are shown (EmailList reports it); the server's order is not it.
+  const [displayOrder, setDisplayOrder] = useState([])
+  // Same rows, same array: the list re-reports on every render, and a new array each time
+  // would render the page again, forever.
+  const handleOrder = useCallback((order) => {
+    setDisplayOrder((prev) => (prev.length === order.length && prev.every((uid, i) => uid === order[i]) ? prev : order))
+  }, [])
+  const listOrder = useMemo(() => {
+    const visible = new Set(pagedUids.map(String))
+    const shown = displayOrder.filter((uid) => visible.has(String(uid)))
+    return shown.length ? shown : pagedUids
+  }, [displayOrder, pagedUids])
+
+  const openNeighbour = (removed) => {
+    if (!selectedUid || !removed.map(String).includes(String(selectedUid))) return
+    const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+    const next = wide ? neighbourAfterRemoval(listOrder, removed) : null
+    setSelectedUid(next)
+  }
+
+  /** Several at once: to Trash (with one Undo), or in Trash, delete for good after asking. */
+  const deleteUids = async (list) => {
+    if (!list.length) return
+    if (selectedFolder === 'trash') {
+      setModalState({ type: 'delete-forever', uids: list })
+      return
+    }
+    const { gone, failed } = await deleteMany(list)
+    openNeighbour(gone)
+    return failed
+  }
+
   // Delete moves to Trash with an Undo, so it no longer asks first. Only in Trash is a delete
   // permanent, and only there does it ask.
   const deleteSelected = async () => {
     const toDelete = [...checkedUids]
     setModalState({ type: null })
-    if (selectedFolder === 'trash') {
-      setModalState({ type: 'delete-forever', uids: toDelete })
-      return
-    }
     // A delete the server refuses must not vanish from the screen; what did not move stays checked.
-    const { failed } = await deleteMany(toDelete)
-    setCheckedUids(new Set(failed))
+    const failed = await deleteUids(toDelete)
+    if (failed) setCheckedUids(new Set(failed))
   }
 
   const restoreSelected = async () => {
@@ -337,11 +369,51 @@ const AuthorizedLayout = () => {
     setCheckedUids(new Set(failed))
   }
 
-  const deleteOne = (uid) => {
+  const deleteOne = async (uid) => {
     if (String(uid).startsWith('draft_')) return handleDeleteDraft(uid)
     if (selectedFolder === 'trash') return setModalState({ type: 'delete-forever', uids: [uid] })
-    return deleteEmail(uid)
+    const next = neighbourAfterRemoval(listOrder, [uid])
+    const wasOpen = String(selectedUid) === String(uid)
+    if (await deleteEmail(uid) && wasOpen) {
+      const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+      setSelectedUid(wide ? next : null)
+    }
   }
+
+  // The list's keyboard: Delete or # deletes what is checked, or else the open message;
+  // Z takes back the last delete; J and K move through the list. Nothing fires while a box
+  // is open, while composing, or while typing.
+  useEffect(() => {
+    const onKey = (event) => {
+      if (composeOpen || modalState.type || needsUnlock) return
+      const action = listShortcut(event, document.activeElement)
+      if (!action) return
+      if (action === 'undo') {
+        if (selectedFolder === 'trash') return
+        event.preventDefault()
+        undoLast()
+        return
+      }
+      if (action === 'next' || action === 'prev') {
+        const next = stepThrough(listOrder, selectedUid, action === 'next' ? 1 : -1)
+        if (next == null) return
+        event.preventDefault()
+        handleSelect(next)
+        return
+      }
+      if (action === 'delete' && selectedFolder !== 'drafts') {
+        if (checkedUids.size) {
+          event.preventDefault()
+          deleteSelected()
+        } else if (selectedUid) {
+          event.preventDefault()
+          deleteOne(selectedUid)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   const markSelectedRead = () => {
     checkedUids.forEach(uid => markRead(uid))
@@ -649,6 +721,8 @@ const AuthorizedLayout = () => {
                 onMarkUnread={markUnread}
                 onToggleStar={toggleStar}
                 onDeleteEmail={deleteOne}
+                onDeleteThread={deleteUids}
+                onOrder={handleOrder}
                 onMoveToGroup={moveToGroup}
                 onRemoveFromGroup={handleRemoveFromGroup}
                 groups={groups}
@@ -766,9 +840,9 @@ const AuthorizedLayout = () => {
         onConfirm={async () => {
           const list = modalState.uids ?? []
           setModalState({ type: null })
-          const { failed } = await trash.deleteForever(list)
+          const { gone, failed } = await trash.deleteForever(list)
           setCheckedUids(new Set(failed))
-          setSelectedUid((prev) => (list.includes(prev) && !failed.includes(prev) ? null : prev))
+          openNeighbour(gone)
         }}
       />
       <ConfirmModal

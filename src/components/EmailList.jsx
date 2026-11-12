@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import EmptyArt from '@/components/EmptyArt'
 import { EmailListItem, EmailRowSkeleton, dayBucket, rowTime } from '@/components/email/EmailListItem'
 import { buildThreads } from '@/lib/threads'
@@ -22,6 +22,10 @@ const EmailList = ({
   onMarkUnread,
   onToggleStar,
   onDeleteEmail,
+  // Deletes every message in a conversation (to Trash, or for good inside Trash).
+  onDeleteThread = null,
+  // Told the order the rows are shown in, so J/K and "open the next one" follow the screen.
+  onOrder = null,
   onMoveToGroup,
   onRemoveFromGroup,
   groups,
@@ -57,6 +61,13 @@ const EmailList = ({
     }
     return out
   }, [threads, previews])
+
+  // The list as the eye reads it: day groups, conversations kept together. The order the
+  // server gave is not it — threads pull older replies up to their newest message.
+  const displayOrder = useMemo(() => grouped.flatMap((group) => group.items.flatMap((thread) => thread.uids)), [grouped])
+  useEffect(() => {
+    onOrder?.(displayOrder)
+  }, [displayOrder, onOrder])
 
   const rowProps = (uid) => ({
     uid,
@@ -142,7 +153,7 @@ const EmailList = ({
               const participants = thread.participants.slice(0, 3).join(', ')
 
               return (
-                <div key={thread.key} data-testid="thread-group" className="border-b border-line/70">
+                <div key={thread.key} data-testid="thread-group" className="group/thread relative border-b border-line/70">
                   <button
                     type="button"
                     onClick={() => {
@@ -196,6 +207,18 @@ const EmailList = ({
                       )}
                     </span>
                   </button>
+                  {onDeleteThread && (
+                    /* Over the time, like a single row's actions: hovering moves nothing. */
+                    <button
+                      type="button"
+                      onClick={() => onDeleteThread(thread.uids)}
+                      className="absolute right-3 top-3 rounded-md border border-line bg-card/95 p-1.5 text-ink-3 opacity-0 shadow-sm transition-opacity duration-120 hover:text-destructive focus-visible:opacity-100 group-hover/thread:opacity-100 max-sm:hidden"
+                      title={`Delete all ${thread.count} messages in this conversation`}
+                      aria-label={`Delete conversation (${thread.count} messages)`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
 
                   {open && (
                     <div className="ml-4 border-l border-line">
