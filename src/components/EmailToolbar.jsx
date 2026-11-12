@@ -73,7 +73,7 @@ export function EmailToolbar({
             {allChecked && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}
           </span>
           <span className="hidden sm:inline">{allChecked ? 'Clear' : 'Select all'}</span>
-          <span className="mono text-ink-4 max-sm:hidden">{pagedUids.length}</span>
+          {!allChecked && <span className="mono text-ink-4 max-sm:hidden">{pagedUids.length}</span>}
         </button>
       )}
       {selected === 0 ? (
