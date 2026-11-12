@@ -3,6 +3,7 @@ import api from '@/api'
 import { storage } from '@/storage'
 import { toast } from '@/lib/toast'
 import { isMissingRoute, restoreMessage, trashMessage } from '@/lib/deleteMessage'
+import { groupEmail } from '@/lib/groupEmail'
 
 /**
  * Delete moves to Trash (see core::trash on the server); Undo, Restore and Delete forever
@@ -168,10 +169,10 @@ export function useEmailActions({
     try {
       for (const g of groups) {
         if (g.uid !== groupId && g.email_uids.includes(emailUid)) {
-          await api.post('/group/remove-email', `{"group_uid":"${g.uid}","email_uid":"${emailUid}"}`, { headers: headers() })
+          await groupEmail('remove', g.uid, emailUid)
         }
       }
-      await api.post('/group/add-email', `{"group_uid":"${groupId}","email_uid":"${emailUid}"}`, { headers: headers() })
+      await groupEmail('add', groupId, emailUid)
     } catch {
       toast('Could not move that message. It is where it was.')
       return
@@ -184,7 +185,7 @@ export function useEmailActions({
 
   const removeFromGroup = async (emailUid, groupId) => {
     try {
-      await api.post('/group/remove-email', `{"group_uid":"${groupId}","email_uid":"${emailUid}"}`, { headers: headers() })
+      await groupEmail('remove', groupId, emailUid)
     } catch {
       toast('Could not take that message out of the group.')
       return

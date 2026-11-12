@@ -88,3 +88,12 @@ describe('moving a message to a group', () => {
     expect(post).toHaveBeenCalledWith('/group/add-email', `{"group_uid":"${GROUP}","email_uid":"${EMAIL}"}`, expect.anything())
   })
 })
+
+describe('a server from before quoted group ids', () => {
+  it('is asked again with bare digits, so filing still works whichever is deployed first', async () => {
+    post.mockRejectedValueOnce(Object.assign(new Error('400'), { response: { status: 400 } })).mockResolvedValue({ data: {} })
+    const { groupEmail } = await import('@/lib/groupEmail')
+    await groupEmail('add', GROUP, EMAIL)
+    expect(post).toHaveBeenLastCalledWith('/group/add-email', `{"group_uid":${GROUP},"email_uid":${EMAIL}}`, expect.anything())
+  })
+})
