@@ -146,9 +146,12 @@ export function EmailListItem({
           both aligned to the same gutters as the toolbar above. */}
       <div
         /* The gap is only worth having when something sits in the second column: an
-           empty time cell still cost 16px of the sender's line. */
+           empty time cell still cost 16px of the sender's line. On a wide row the
+           subject is a column of its own, so the gap stays: without it, every row with
+           no time printed (anything before today) started its subject 16px left of the
+           rows above it. */
         className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-0.5 @[520px]:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] ${
-          stamped ? 'gap-x-4' : 'gap-x-0'
+          stamped ? 'gap-x-4' : 'gap-x-0 @[520px]:gap-x-4'
         }`}
       >
         <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5">

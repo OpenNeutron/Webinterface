@@ -209,7 +209,7 @@ export default function Settings() {
           <span className="mono ml-auto hidden truncate text-[11.5px] text-ink-3 sm:inline">{email}</span>
           <button
             onClick={signOut}
-            className="rounded-md p-2 text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1"
+            className="rounded-md p-2 text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1 max-sm:ml-auto max-sm:p-3"
             aria-label="Sign out"
             title="Sign out"
           >
