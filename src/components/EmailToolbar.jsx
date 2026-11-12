@@ -4,7 +4,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { Trash2, MailOpen, Mail, Folder, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { Trash2, MailOpen, Mail, Folder, ChevronLeft, ChevronRight, RefreshCw, Check } from 'lucide-react'
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -31,6 +31,8 @@ export function EmailToolbar({
   groups,
   filterMode = 'all',
   onFilterModeChange,
+  onToggleSelectAll,
+  allChecked = false,
   onDeleteSelected,
   onMarkSelectedRead,
   onMarkSelectedUnread,
@@ -49,6 +51,31 @@ export function EmailToolbar({
     <div className="border-b border-line">
       <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-4 py-1.5">
         <div className="flex w-full items-center gap-3">
+      {/* Selecting is the way to every bulk action, so the control that starts it is always
+          visible while there are rows — a checkbox that only appears on hover is a feature
+          nobody finds, and on a phone there is no hover at all. */}
+      {pagedUids.length > 0 && (
+        <button
+          type="button"
+          onClick={onToggleSelectAll}
+          aria-pressed={allChecked}
+          aria-label={allChecked
+            ? `Clear the selection of ${pagedUids.length} message${pagedUids.length !== 1 ? 's' : ''}`
+            : `Select all ${pagedUids.length} message${pagedUids.length !== 1 ? 's' : ''} on this page`}
+          title={allChecked ? 'Clear the selection' : `Select the ${pagedUids.length} messages on this page`}
+          className="flex shrink-0 items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5 text-[11.5px] text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1 max-sm:min-h-11 max-sm:min-w-11 max-sm:justify-center max-sm:px-2"
+        >
+          <span
+            className={`flex size-4 shrink-0 items-center justify-center rounded border transition-colors duration-120 max-sm:size-5 ${
+              allChecked ? 'border-primary bg-primary' : 'border-ink-4/70 bg-transparent'
+            }`}
+          >
+            {allChecked && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}
+          </span>
+          <span className="hidden sm:inline">{allChecked ? 'Clear' : 'Select all'}</span>
+          <span className="mono text-ink-4 max-sm:hidden">{pagedUids.length}</span>
+        </button>
+      )}
       {selected === 0 ? (
         <div className="flex items-center gap-1" role="tablist" aria-label="Filter messages">
           {FILTERS.map((f) => (
@@ -110,15 +137,17 @@ export function EmailToolbar({
               </DropdownMenuContent>
             </DropdownMenuRoot>
           )}
-          {/* Destructive: colour, never size or fill. */}
+          {/* Destructive: colour, never size or fill. The count rides the label, because
+              "delete" alone does not say how much. */}
           <button
             type="button"
             onClick={onDeleteSelected}
             className={`${action} text-destructive hover:bg-destructive/10`}
-            title="Delete selected"
-            aria-label="Delete selected messages"
+            title={`Delete ${selected} selected message${selected !== 1 ? 's' : ''}`}
+            aria-label={`Delete ${selected} selected message${selected !== 1 ? 's' : ''}`}
           >
             <Trash2 className="size-3.5" />
+            <span className="hidden font-medium sm:inline">Delete {selected}</span>
           </button>
         </div>
       )}

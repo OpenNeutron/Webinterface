@@ -117,7 +117,7 @@ export function EmailListItem({
         }`}
       />
 
-      <div className="flex w-4 shrink-0 items-center justify-center self-stretch max-sm:hidden">
+      <div className="flex w-4 shrink-0 items-center justify-center self-stretch max-sm:w-11">
         <button
           type="button"
           aria-label={isChecked ? 'Unselect message' : 'Select message'}
@@ -131,8 +131,8 @@ export function EmailListItem({
           <span
             className={`flex size-4 items-center justify-center rounded border transition-all duration-120 max-sm:size-5 ${
               isChecked
-                ? 'border-primary bg-primary opacity-100'
-                : 'border-ink-4 opacity-0 hover:border-ink-2 group-hover/item:opacity-100 focus-visible:opacity-100'
+                ? 'border-primary bg-primary'
+                : 'border-ink-4/60 hover:border-ink-2'
             }`}
           >
             {isChecked && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}

@@ -10,6 +10,7 @@ import { ConfirmModal, InputModal } from '@/components/ui/Modal'
 import { TopBar } from '@/components/TopBar'
 import SetupStrip from '@/components/SetupStrip'
 import { fetchPostQuantumStatus } from '@/lib/pqSetup'
+import { toast } from '@/lib/toast'
 import { hasIdentity } from '@/pgp'
 import { UnlockModal } from '@/components/UnlockModal'
 import { EmailToolbar } from '@/components/EmailToolbar'
@@ -284,8 +285,17 @@ const AuthorizedLayout = () => {
   }
 
   const handleToggleSelectAll = () => {
-    const allChecked = pagedUids.every(uid => checkedUids.has(uid))
-    setCheckedUids(allChecked ? new Set() : new Set(pagedUids))
+    // Page-scoped, and it does not throw away a selection made on another page: the control says
+    // "select all N on this page", so it must mean exactly that.
+    setCheckedUids(prev => {
+      const next = new Set(prev)
+      const allOnPage = pagedUids.length > 0 && pagedUids.every(uid => next.has(uid))
+      for (const uid of pagedUids) {
+        if (allOnPage) next.delete(uid)
+        else next.add(uid)
+      }
+      return next
+    })
   }
 
   const deleteSelected = async () => {
@@ -293,6 +303,9 @@ const AuthorizedLayout = () => {
     setModalState({ type: null })
     const token = storage.getToken()
     const headers = { Authorization: `Bearer ${token}` }
+    // A delete that the server refuses must not vanish from the screen: the row would come back on
+    // the next refresh and look like the app lied. Collect the failures, remove only what went.
+    const failed = []
     await Promise.all(toDelete.map(async (uid) => {
       try {
         await api.post('/email/delete', `{"uid":"${uid}"}`, { headers })
@@ -301,13 +314,26 @@ const AuthorizedLayout = () => {
             try { await api.post('/group/remove-email', `{"group_uid":${g.uid},"email_uid":${uid}}`, { headers }) } catch {}
           }
         }
-      } catch {}
+      } catch {
+        failed.push(uid)
+      }
     }))
-    setUids(prev => prev.filter(u => !toDelete.includes(u)))
-    setPreviews(prev => { const n = { ...prev }; toDelete.forEach(u => delete n[u]); return n })
-    setSelectedUid(prev => (toDelete.includes(prev) ? null : prev))
-    setGroups(prev => prev.map(g => ({ ...g, email_uids: g.email_uids.filter(u => !toDelete.includes(u)) })))
-    setCheckedUids(new Set())
+    const gone = toDelete.filter((uid) => !failed.includes(uid))
+    if (gone.length) {
+      setUids(prev => prev.filter(u => !gone.includes(u)))
+      setPreviews(prev => { const n = { ...prev }; gone.forEach(u => delete n[u]); return n })
+      setSelectedUid(prev => (gone.includes(prev) ? null : prev))
+      setGroups(prev => prev.map(g => ({ ...g, email_uids: g.email_uids.filter(u => !gone.includes(u)) })))
+    }
+    // Whatever did not delete stays checked, so the person can press it again rather than hunt rows.
+    setCheckedUids(new Set(failed))
+    if (failed.length) {
+      toast(gone.length
+        ? `Deleted ${gone.length}. ${failed.length} could not be deleted — still selected.`
+        : `Nothing was deleted: the server refused ${failed.length}. Still selected.`)
+    } else {
+      toast(`Deleted ${gone.length} email${gone.length !== 1 ? 's' : ''}`)
+    }
   }
 
   const markSelectedRead = () => {
@@ -551,6 +577,8 @@ const AuthorizedLayout = () => {
                 groups={groups}
                 filterMode={filterMode}
                 onFilterModeChange={(m) => { setFilterMode(m); setPage(0) }}
+                onToggleSelectAll={handleToggleSelectAll}
+                allChecked={pagedUids.length > 0 && pagedUids.every(uid => checkedUids.has(uid))}
                 onDeleteSelected={() => setModalState({ type: 'delete-selected' })}
                 onMarkSelectedRead={markSelectedRead}
                 onMarkSelectedUnread={markSelectedUnread}
