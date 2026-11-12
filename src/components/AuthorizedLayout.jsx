@@ -8,6 +8,7 @@ import EmailView from '@/components/EmailView'
 import { ConfirmModal, InputModal } from '@/components/ui/Modal'
 import { SenderRulesModal } from '@/components/SenderRulesModal'
 import { toast } from '@/lib/toast'
+import { groupEmail } from '@/lib/groupEmail'
 import { TopBar } from '@/components/TopBar'
 import SetupStrip from '@/components/SetupStrip'
 import { fetchPostQuantumStatus } from '@/lib/pqSetup'
@@ -253,9 +254,7 @@ const AuthorizedLayout = () => {
     const filed = []
     for (const uid of list) {
       try {
-        await api.post('/group/add-email', `{"group_uid":"${group.uid}","email_uid":"${uid}"}`, {
-          headers: { Authorization: `Bearer ${storage.getToken()}` },
-        })
+        await groupEmail('add', group.uid, uid)
         filed.push(String(uid))
       } catch {
         // silent: counted below; the rule itself is saved and will file what arrives next.
