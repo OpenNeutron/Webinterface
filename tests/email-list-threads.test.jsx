@@ -103,3 +103,39 @@ describe('a conversation can be selected and deleted from the list', () => {
     expect(screen.getByRole('button', { name: /Unselect conversation/ }).getAttribute('aria-pressed')).toBe('true')
   })
 })
+
+describe('older mail', () => {
+  it('loads by itself when the end of the list comes into view', () => {
+    const observers = []
+    const original = globalThis.IntersectionObserver
+    globalThis.IntersectionObserver = class {
+      constructor(callback) { this.callback = callback; observers.push(this) }
+      observe(el) { this.el = el }
+      disconnect() {}
+    }
+    try {
+      const onLoadMore = vi.fn()
+      render(<EmailList {...props} hasMore onLoadMore={onLoadMore} />)
+      expect(observers).toHaveLength(1)
+      observers[0].callback([{ isIntersecting: true, target: observers[0].el }])
+      expect(onLoadMore).toHaveBeenCalledTimes(1)
+      // The button is still there for a browser that cannot watch.
+      expect(screen.getByRole('button', { name: 'Load older mail' })).toBeTruthy()
+    } finally {
+      globalThis.IntersectionObserver = original
+    }
+  })
+
+  it('does not watch while loading or when there is nothing older', () => {
+    const observe = vi.fn()
+    const original = globalThis.IntersectionObserver
+    globalThis.IntersectionObserver = class { observe = observe; disconnect() {} }
+    try {
+      render(<EmailList {...props} hasMore={false} onLoadMore={vi.fn()} />)
+      render(<EmailList {...props} hasMore loading onLoadMore={vi.fn()} />)
+      expect(observe).not.toHaveBeenCalled()
+    } finally {
+      globalThis.IntersectionObserver = original
+    }
+  })
+})

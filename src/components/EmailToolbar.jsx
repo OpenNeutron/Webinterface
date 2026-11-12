@@ -68,8 +68,8 @@ export function EmailToolbar({
           aria-pressed={allChecked}
           aria-label={allChecked
             ? `Clear the selection of ${pagedUids.length} message${pagedUids.length !== 1 ? 's' : ''}`
-            : `Select all ${pagedUids.length} message${pagedUids.length !== 1 ? 's' : ''} on this page`}
-          title={allChecked ? 'Clear the selection' : `Select the ${pagedUids.length} messages on this page`}
+            : `Select all ${pagedUids.length} message${pagedUids.length !== 1 ? 's' : ''} shown`}
+          title={allChecked ? 'Clear the selection' : `Select the ${pagedUids.length} messages shown`}
           className="flex shrink-0 items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5 text-[11.5px] text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1 max-sm:min-h-11 max-sm:min-w-11 max-sm:justify-center max-sm:px-2"
         >
           <span
