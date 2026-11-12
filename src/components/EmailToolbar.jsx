@@ -4,7 +4,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { Trash2, MailOpen, Mail, Folder, ChevronLeft, ChevronRight, RefreshCw, Check } from 'lucide-react'
+import { Trash2, MailOpen, Mail, Folder, ChevronLeft, ChevronRight, RefreshCw, Check, Undo2 } from 'lucide-react'
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -34,6 +34,8 @@ export function EmailToolbar({
   onToggleSelectAll,
   allChecked = false,
   onDeleteSelected,
+  // Trash: Restore appears, and Delete says it is for good.
+  onRestoreSelected = null,
   onMarkSelectedRead,
   onMarkSelectedUnread,
   onMoveSelectedToGroup,
@@ -137,17 +139,29 @@ export function EmailToolbar({
               </DropdownMenuContent>
             </DropdownMenuRoot>
           )}
+          {onRestoreSelected && (
+            <button
+              type="button"
+              onClick={onRestoreSelected}
+              className={`${action} text-ink-2 hover:bg-accent hover:text-ink-1`}
+              title={`Restore ${selected} selected message${selected !== 1 ? 's' : ''}`}
+              aria-label={`Restore ${selected} selected message${selected !== 1 ? 's' : ''}`}
+            >
+              <Undo2 className="size-3.5" />
+              <span className="hidden font-medium sm:inline">Restore {selected}</span>
+            </button>
+          )}
           {/* Destructive: colour, never size or fill. The count rides the label, because
               "delete" alone does not say how much. */}
           <button
             type="button"
             onClick={onDeleteSelected}
             className={`${action} text-destructive hover:bg-destructive/10`}
-            title={`Delete ${selected} selected message${selected !== 1 ? 's' : ''}`}
-            aria-label={`Delete ${selected} selected message${selected !== 1 ? 's' : ''}`}
+            title={`${onRestoreSelected ? 'Delete for good' : 'Delete'} ${selected} selected message${selected !== 1 ? 's' : ''}`}
+            aria-label={`${onRestoreSelected ? 'Delete for good' : 'Delete'} ${selected} selected message${selected !== 1 ? 's' : ''}`}
           >
             <Trash2 className="size-3.5" />
-            <span className="hidden font-medium sm:inline">Delete {selected}</span>
+            <span className="hidden font-medium sm:inline">{onRestoreSelected ? 'Delete for good' : 'Delete'} {selected}</span>
           </button>
         </div>
       )}

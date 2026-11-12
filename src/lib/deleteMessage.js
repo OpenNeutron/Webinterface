@@ -28,3 +28,42 @@ export async function deleteMessage(uid, sentUids) {
     headers: { Authorization: `Bearer ${token}` },
   })
 }
+
+const auth = () => ({ headers: { Authorization: `Bearer ${storage.getToken()}` } })
+
+/**
+ * A server that predates the trash answers its router's 404 (`not_found`), not the
+ * endpoint's `email_not_found`. Told apart so the app can say "update the server"
+ * instead of pretending the message is missing.
+ */
+export function isMissingRoute(error) {
+  return error?.response?.status === 404 && error?.response?.data?.code === 'not_found'
+}
+
+/** Move one message (received or sent) to the trash. */
+export async function trashMessage(uid) {
+  const { data } = await api.post('/email/trash', `{"uid":"${uid}"}`, auth())
+  return data
+}
+
+/** Take one message out of the trash, back to where it was. */
+export async function restoreMessage(uid) {
+  await api.post('/email/restore', `{"uid":"${uid}"}`, auth())
+}
+
+/** The trash, newest first: [{ uid, kind: 'inbox'|'sent', trashed_at, deletes_at }]. */
+export async function listTrash() {
+  const { data } = await api.post('/email/trash/list', {}, auth())
+  return { items: (data?.items ?? []).map((item) => ({ ...item, uid: String(item.uid) })), retentionDays: data?.retention_days ?? 30 }
+}
+
+/** Delete everything in the trash, for good. */
+export async function emptyTrash() {
+  const { data } = await api.post('/email/trash/empty', {}, auth())
+  return data
+}
+
+/** Delete one trashed message for good, from the list it belongs to. */
+export async function deleteForever(uid, kind) {
+  await api.post(kind === 'sent' ? '/email/sent/delete' : '/email/delete', `{"uid":"${uid}"}`, auth())
+}
