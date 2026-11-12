@@ -6,6 +6,8 @@ import EmailList from '@/components/EmailList'
 import ScheduledPanel from '@/components/ScheduledPanel'
 import EmailView from '@/components/EmailView'
 import { ConfirmModal, InputModal } from '@/components/ui/Modal'
+import { SenderRulesModal } from '@/components/SenderRulesModal'
+import { toast } from '@/lib/toast'
 import { TopBar } from '@/components/TopBar'
 import SetupStrip from '@/components/SetupStrip'
 import { fetchPostQuantumStatus } from '@/lib/pqSetup'
@@ -118,7 +120,7 @@ const AuthorizedLayout = () => {
       await reloadFolders()
     },
   })
-  const { createGroup, renameGroup, deleteGroup } = useGroupActions({ setGroups, setSelectedFolder, setModalState })
+  const { createGroup, renameGroup, deleteGroup, setSenderRules } = useGroupActions({ setGroups, setSelectedFolder, setModalState })
 
   useEffect(() => {
     let alive = true
@@ -235,6 +237,57 @@ const AuthorizedLayout = () => {
     return uids
   })()
 
+  // ── Senders ────────────────────────────────────────────────────────────────
+  const senderOf = (uid) => (previews[uid]?.from?.email || '').toLowerCase()
+  /** The messages in the folder on screen from one sender (what is loaded here). */
+  const uidsFromSender = (address) => visibleUids.filter((uid) => senderOf(uid) === address)
+
+  /**
+   * A rule only files mail that arrives after it; the messages from those senders already here
+   * are filed now, so the group is right the moment the rule is saved.
+   */
+  const fileExisting = async (group, addresses) => {
+    const wanted = new Set(addresses)
+    const have = new Set((group.email_uids ?? []).map(String))
+    const list = uids.filter((uid) => wanted.has(senderOf(uid)) && !have.has(String(uid)))
+    const filed = []
+    for (const uid of list) {
+      try {
+        await api.post('/group/add-email', `{"group_uid":"${group.uid}","email_uid":"${uid}"}`, {
+          headers: { Authorization: `Bearer ${storage.getToken()}` },
+        })
+        filed.push(String(uid))
+      } catch {
+        // silent: counted below; the rule itself is saved and will file what arrives next.
+      }
+    }
+    if (filed.length) {
+      setGroups((prev) => prev.map((g) => (g.uid === group.uid ? { ...g, email_uids: [...new Set([...(g.email_uids ?? []).map(String), ...filed])] } : g)))
+    }
+    return { filed: filed.length, missed: list.length - filed.length }
+  }
+
+  const fileSender = async (address, groupUid) => {
+    const group = groups.find((g) => g.uid === groupUid)
+    if (!group) return
+    const updated = await setSenderRules(groupUid, [...(group.filter_addresses ?? []), address])
+    if (!updated) return
+    const { filed, missed } = await fileExisting({ ...group, ...updated }, [address])
+    toast(`Mail from ${address} now goes to ${group.title} as it arrives.${filed ? ` ${filed} already here filed too.` : ''}${missed ? ` ${missed} could not be filed.` : ''}`)
+  }
+
+  const saveSenderRules = async (addresses) => {
+    const group = groups.find((g) => g.uid === modalState.groupUid)
+    setModalState({ type: null })
+    if (!group) return
+    const before = new Set(group.filter_addresses ?? [])
+    const updated = await setSenderRules(group.uid, addresses)
+    if (!updated) return
+    const added = (updated.filter_addresses ?? []).filter((address) => !before.has(address))
+    const { filed } = added.length ? await fileExisting({ ...group, ...updated }, added) : { filed: 0 }
+    toast(`${group.title}: ${updated.filter_addresses?.length ? `${updated.filter_addresses.length} sender rule${updated.filter_addresses.length === 1 ? '' : 's'} saved` : 'sender rules removed'}.${filed ? ` ${filed} message${filed === 1 ? '' : 's'} already here filed.` : ''}`)
+  }
+
   const draftPreviews = useMemo(() => {
     const map = {}
     for (const d of drafts) {
@@ -277,6 +330,20 @@ const AuthorizedLayout = () => {
     () => (selectedFolder === 'inbox' ? uids.filter((uid) => emailMeta[uid]?.unread !== false).length : 0),
     [uids, emailMeta, selectedFolder],
   )
+  // The unread count where a phone and a tab strip show it: in the title, and on the app icon
+  // when Sloth Mail is installed. Counted over the inbox whatever folder is open.
+  const unreadForBadge = useMemo(() => uids.filter((uid) => emailMeta[uid]?.unread !== false).length, [uids, emailMeta])
+  useEffect(() => {
+    document.title = unreadForBadge ? `(${unreadForBadge}) Sloth Lee Mail` : 'Sloth Lee Mail'
+    try {
+      if (unreadForBadge) navigator.setAppBadge?.(unreadForBadge)?.catch?.(() => {})
+      else navigator.clearAppBadge?.()?.catch?.(() => {})
+    } catch {
+      // silent: the badge is a courtesy; a browser without it simply shows none.
+    }
+  }, [unreadForBadge])
+  useEffect(() => () => { document.title = 'Sloth Lee Mail' }, [])
+
   const pageCount = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE))
   const safePage = Math.min(page, pageCount - 1)
   const pageStart = totalFiltered === 0 ? 0 : safePage * PAGE_SIZE + 1
@@ -405,6 +472,14 @@ const AuthorizedLayout = () => {
     }
     openNeighbour(gone)
     return failed
+  }
+
+  /** Everything here from one sender, to Trash with one Undo — the cure for a noisy alert. */
+  const deleteFromSender = async (address) => {
+    const list = uidsFromSender(address)
+    if (!list.length) return
+    const failed = await deleteUids(list)
+    if (failed?.length) setCheckedUids(new Set(failed))
   }
 
   // Delete moves to Trash with an Undo, so it no longer asks first. Only in Trash is a delete
@@ -628,6 +703,7 @@ const AuthorizedLayout = () => {
             onRequestCreateGroup={() => setModalState({ type: 'create-group' })}
             onRequestRenameGroup={(id, name) => setModalState({ type: 'rename-group', id, name })}
             onRequestDeleteGroup={(id, name) => setModalState({ type: 'delete-group', id, name })}
+            onRequestSenderRules={(groupUid) => setModalState({ type: 'sender-rules', groupUid })}
             emailMeta={emailMeta}
             uids={uids}
             sentCount={sentUids.length}
@@ -667,6 +743,7 @@ const AuthorizedLayout = () => {
                 onRequestCreateGroup={() => { setNavOpen(false); setModalState({ type: 'create-group' }) }}
                 onRequestRenameGroup={(id, name) => { setNavOpen(false); setModalState({ type: 'rename-group', id, name }) }}
                 onRequestDeleteGroup={(id, name) => { setNavOpen(false); setModalState({ type: 'delete-group', id, name }) }}
+                onRequestSenderRules={(groupUid) => { setNavOpen(false); setModalState({ type: 'sender-rules', groupUid }) }}
                 emailMeta={emailMeta}
                 uids={uids}
                 sentCount={sentUids.length}
@@ -836,6 +913,9 @@ const AuthorizedLayout = () => {
                 onReplyAll={handleReplyAll}
                 onForward={handleForward}
                 onComposeTo={handleComposeTo}
+                onFileSender={selectedFolder === 'trash' || selectedFolder === 'sent' ? null : fileSender}
+                onDeleteFromSender={selectedFolder === 'trash' ? null : deleteFromSender}
+                countFromSender={(address) => uidsFromSender(address).length}
               />
             </div>
             )}
@@ -911,6 +991,12 @@ const AuthorizedLayout = () => {
           setCheckedUids(new Set(failed))
           openNeighbour(gone)
         }}
+      />
+      <SenderRulesModal
+        isOpen={modalState.type === 'sender-rules'}
+        group={groups.find((g) => g.uid === modalState.groupUid) ?? null}
+        onSave={saveSenderRules}
+        onClose={() => setModalState({ type: null })}
       />
       <ConfirmModal
         isOpen={modalState.type === 'empty-trash'}

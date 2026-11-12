@@ -46,6 +46,7 @@ const Sidebar = ({
   onRequestCreateGroup,
   onRequestRenameGroup,
   onRequestDeleteGroup,
+  onRequestSenderRules = null,
   emailMeta,
   uids,
   sentCount = 0,
@@ -210,6 +211,11 @@ const Sidebar = ({
                     <DropdownMenuItem onClick={() => onRequestRenameGroup(group.uid, group.title)}>
                       Rename
                     </DropdownMenuItem>
+                    {onRequestSenderRules && (
+                      <DropdownMenuItem onClick={() => onRequestSenderRules(group.uid)}>
+                        Sender rules{group.filter_addresses?.length ? ` (${group.filter_addresses.length})` : '…'}
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       destructive
                       onClick={() => onRequestDeleteGroup(group.uid, group.title)}
