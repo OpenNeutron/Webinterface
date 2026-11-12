@@ -181,7 +181,7 @@ export function EmailToolbar({
           </>
         )}
         {!showPager && totalFiltered > 0 && (
-          <span className="mono text-[11.5px] text-ink-3 max-sm:hidden">
+          <span className="mono shrink-0 whitespace-nowrap text-[11.5px] text-ink-3 max-sm:hidden">
             {totalFiltered} {totalFiltered === 1 ? 'message' : 'messages'}
           </span>
         )}

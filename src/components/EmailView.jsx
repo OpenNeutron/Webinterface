@@ -334,7 +334,9 @@ const EmailView = ({
           {/* One measure for the whole message: a line of text that runs the
               width of a wide window is unreadable, and the header has to sit in
               the same column as the body it introduces. */}
-          <div className="mx-auto w-full max-w-[720px] px-6 pb-12 max-sm:px-4 max-sm:pb-8">
+          {/* No bottom padding here: the divider's own margin is the gap. With padding as
+              well, the body started 68px below the line that introduces it. */}
+          <div className="mx-auto w-full max-w-[720px] px-6 max-sm:px-4">
             <h1 className="display mt-7 flex items-start gap-2 text-[22px] leading-snug text-ink-1 max-sm:mt-2 max-sm:text-[17.5px] max-sm:leading-[1.28]">
               <span className="min-w-0 line-clamp-2 max-sm:line-clamp-2">{email.subject || '(no subject)'}</span>
               {email.e2ee && (

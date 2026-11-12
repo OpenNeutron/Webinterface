@@ -14,14 +14,14 @@ export default function SetupStrip({ items, onOpen, onDismiss }) {
 
   return (
     <div className="border-b border-line">
-      <div className="mx-auto flex w-full max-w-[1040px] items-center gap-2 px-4 py-1.5 max-sm:min-h-[36px] max-sm:items-start max-sm:py-2">
+      <div className="mx-auto flex w-full max-w-[1040px] items-center gap-2 px-4 py-1.5 max-sm:min-h-[36px] max-sm:py-1">
         <ShieldAlert className="size-3.5 shrink-0 text-sand" aria-hidden="true" />
 
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex min-w-0 items-start gap-1.5 text-left text-[12px] text-ink-2 hover:text-ink-1 max-sm:min-h-11"
+          className="flex min-w-0 items-start gap-1.5 text-left text-[12px] text-ink-2 hover:text-ink-1 max-sm:min-h-11 max-sm:items-center"
         >
           {open ? <ChevronDown className="mt-[3px] size-3.5 shrink-0 text-ink-3" /> : <ChevronRight className="mt-[3px] size-3.5 shrink-0 text-ink-3" />}
           <span className="truncate max-sm:line-clamp-2 max-sm:whitespace-normal">

@@ -635,8 +635,8 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-2 px-3 sm:px-6">
-              <span className="text-sm font-semibold text-muted-foreground w-16 shrink-0 py-1.5">Subject:</span>
+            <div className="flex items-center gap-2 px-6">
+              <span className="text-xs font-semibold text-foreground/40 shrink-0 py-1.5">Subject:</span>
               <input
                 type="text"
                 value={subject}
@@ -995,7 +995,7 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
                     value={vanish}
                     onChange={(e) => setVanish(e.target.value)}
                     disabled={isSendBlocked}
-                    className="bg-transparent border border-border rounded px-1.5 py-1.5 sm:py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 max-sm:min-h-11"
+                    className="bg-transparent border border-border rounded px-1.5 py-1.5 sm:py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 max-sm:min-h-11 max-sm:w-[7.5rem]"
                     aria-label="Disappearing message"
                   >
                     <option value="off">No expiry</option>
