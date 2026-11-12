@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
 import { ExternalLink } from 'lucide-react'
 import { segmentLinks } from '@/emailParser'
-import { PgpBody } from '@/components/email/PgpBody'
-import { looksEncrypted } from '@/pgp'
+import { looksEncrypted } from '@/lib/pgpRing'
+
+// The OpenPGP library loads with the first encrypted message, not with the app.
+const PgpBody = lazy(() => import('@/components/email/PgpBody').then((m) => ({ default: m.PgpBody })))
 
 // Configure DOMPurify: strip scripts/event-handlers, force all links to open in new tab
 const DOMPURIFY_CONFIG = {
@@ -404,7 +406,11 @@ export function EmailBody({ textBody, htmlBody, senderHint }) {
   // text, which is exactly how "OpenPGP does not work" looked.
   const armored = extractArmor(htmlBody) || extractArmor(textBody)
   if (armored) {
-    return <PgpBody armored={armored} senderHint={senderHint} />
+    return (
+      <Suspense fallback={<p className="text-[12.5px] text-ink-3">Opening the encrypted message…</p>}>
+        <PgpBody armored={armored} senderHint={senderHint} />
+      </Suspense>
+    )
   }
 
   // Prefer explicit htmlBody; fall back to textBody that looks like HTML

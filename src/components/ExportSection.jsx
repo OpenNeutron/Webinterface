@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, Eye, EyeOff, Lock, TriangleAlert } from 'lucide-react'
+import { Eye, EyeOff, Lock, TriangleAlert } from 'lucide-react'
 import { keySession } from '@/keySession'
 import { storage } from '@/storage'
 import { emailListAll, emailGetRaw } from '@/api'
@@ -103,11 +103,8 @@ export default function ExportSection() {
   }
 
   return (
-    <section className="mb-4 rounded-xl bg-secondary/60 p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <Download size={16} className="text-ink-2" />
-        <h3 className="text-sm font-medium text-ink-1">Download your mail</h3>
-      </div>
+    // Settings gives this section its card and title; no second card or heading inside.
+    <section>
 
       <form onSubmit={exportSealed} className="space-y-2">
         <p className="max-w-[62ch] text-xs leading-relaxed text-ink-3">

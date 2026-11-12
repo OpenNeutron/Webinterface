@@ -34,28 +34,10 @@ export async function sealFileWithPassphrase({ bytes, passphrase }) {
 
 import * as openpgp from 'openpgp'
 
-const RING_KEY = 'sloth.pgp.keyring.v1'
-
-function emptyRing() {
-  return { identity: null, contacts: {} }
-}
-
-export function loadRing() {
-  try {
-    const raw = localStorage.getItem(RING_KEY)
-    if (!raw) return emptyRing()
-    const parsed = JSON.parse(raw)
-    const contacts = {}
-    for (const [email, value] of Object.entries(parsed.contacts ?? {})) {
-      // Older rings stored bare armor. Normalise to {armored, fingerprint} so
-      // every contact has a pin to compare future imports against.
-      contacts[email] = typeof value === 'string' ? { armored: value, fingerprint: null } : value
-    }
-    return { identity: parsed.identity ?? null, contacts }
-  } catch {
-    return emptyRing()
-  }
-}
+// Ring reading and the armour test live in lib/pgpRing.js so the page can use them without
+// loading the OpenPGP library; they are re-exported here so nothing that imports them moves.
+import { RING_KEY, emptyRing, loadRing, hasIdentity, looksEncrypted } from '@/lib/pgpRing'
+export { loadRing, hasIdentity, looksEncrypted }
 
 function contactArmor(contact) {
   return typeof contact === 'string' ? contact : contact?.armored ?? ''
@@ -73,10 +55,6 @@ function saveRing(ring) {
 /** The account's own OpenPGP identity, or null when none has been created. */
 export function getIdentity() {
   return loadRing().identity
-}
-
-export function hasIdentity() {
-  return !!loadRing().identity
 }
 
 /**
@@ -502,10 +480,6 @@ export async function decryptAttachment({ armored, passphrase }) {
   const message = await openpgp.readMessage({ armoredMessage: (armored ?? '').trim() })
   const { data } = await openpgp.decrypt({ message, decryptionKeys: privateKey, format: 'binary' })
   return data
-}
-
-export function looksEncrypted(text) {
-  return typeof text === 'string' && text.includes('-----BEGIN PGP MESSAGE-----')
 }
 
 /**

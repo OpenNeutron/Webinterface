@@ -22,14 +22,12 @@ export default function ProfileSection() {
   }
 
   return (
-    <section className="mb-4 rounded-xl bg-secondary/60 p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <User size={16} className="text-ink-2" />
-        <h3 className="text-sm font-medium text-ink-1">Your name and signature</h3>
-      </div>
-      <p className="mb-3 text-xs text-ink-3">
-        Stored on this device only. The name appears on the mail you send; the
-        signature is added below each new message.
+    // Settings already puts each section in a card under its own title; a second card and a
+    // second heading inside it said the same thing twice.
+    <section>
+      <p className="mb-3 flex items-center gap-1.5 text-xs text-ink-3">
+        <User size={13} className="shrink-0" aria-hidden="true" />
+        Stored on this device only.
       </p>
 
       <label className="mb-1 block text-xs text-ink-2" htmlFor="profile-name">
@@ -57,6 +55,7 @@ export default function ProfileSection() {
 
       <button
         onClick={save}
+        type="button"
         className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 max-sm:min-h-11"
       >
         {saved ? <Check size={14} /> : null}

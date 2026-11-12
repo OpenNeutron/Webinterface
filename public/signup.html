@@ -82,10 +82,8 @@
   .facts li { display: flex; gap: 12px; margin-bottom: 20px; }
   .facts b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
   .facts span { display: block; margin-top: 2px; max-width: 42ch; font-size: 12px; color: var(--ink-3); }
-  .dot {
-    flex: none; width: 7px; height: 7px; margin-top: 6px; border-radius: 50%;
-    background: var(--moss);
-  }
+  /* The same three icons as the sign-in page (lucide key-round, timer, eye-off). */
+  .ico { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--moss); }
   .aside .domain { font: 11px/1 ui-monospace, Menlo, Consolas, monospace; color: var(--ink-4); }
 
   /* ---------- the form ---------- */
@@ -153,6 +151,14 @@
   @media (prefers-reduced-motion: reduce) {
     * { transition-duration: 1ms !important; }
   }
+  /* On a wider screen the fields match the sign-in page (36px, 13px). A phone keeps 44px and
+     16px: anything smaller makes iOS zoom the page when the field is tapped. */
+  @media (min-width: 640px) {
+    input { min-height: 36px; padding: 7px 12px; border-radius: 6px; font-size: 13px; }
+    .suffix { border-top-right-radius: 6px; border-bottom-right-radius: 6px; font-size: 12.5px; }
+    button.primary { min-height: 36px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+    .tabs { border-radius: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -176,9 +182,9 @@
       <h1>Mail that stays yours.</h1>
       <p>A mailbox where the encryption happens on your device, not on our server.</p>
       <ul class="facts">
-        <li><i class="dot"></i><div><b>The key never leaves your device</b><span>Your mail is encrypted with a key generated in this browser. The server stores ciphertext it cannot open.</span></div></li>
-        <li><i class="dot"></i><div><b>Notes that close behind you</b><span>Send something that deletes itself on first read, on a timer, or with a passphrase.</span></div></li>
-        <li><i class="dot"></i><div><b>No ads, no tracking, no reading</b><span>No analytics scripts, no pixels in your mail, nothing sold to anyone.</span></div></li>
+        <li><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg><div><b>The key never leaves your device</b><span>Your mail is encrypted with a key generated in this browser. The server stores ciphertext it cannot open.</span></div></li>
+        <li><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></svg><div><b>Notes that close behind you</b><span>Send something that deletes itself on first read, on a timer, or with a passphrase.</span></div></li>
+        <li><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg><div><b>No ads, no tracking, no reading</b><span>No analytics scripts, no pixels in your mail, nothing sold to anyone.</span></div></li>
       </ul>
     </div>
 

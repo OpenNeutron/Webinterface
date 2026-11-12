@@ -1,16 +1,15 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, Suspense, lazy } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Inbox, PenLine, X } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import EmailList from '@/components/EmailList'
 import ScheduledPanel from '@/components/ScheduledPanel'
 import EmailView from '@/components/EmailView'
-import ComposeWindow from '@/components/ComposeWindow'
 import { ConfirmModal, InputModal } from '@/components/ui/Modal'
 import { TopBar } from '@/components/TopBar'
 import SetupStrip from '@/components/SetupStrip'
 import { fetchPostQuantumStatus } from '@/lib/pqSetup'
-import { hasIdentity } from '@/pgp'
+import { hasIdentity } from '@/lib/pgpRing'
 import { UnlockModal } from '@/components/UnlockModal'
 import { EmailToolbar } from '@/components/EmailToolbar'
 import { useEmailFetch } from '@/hooks/useEmailFetch'
@@ -26,6 +25,8 @@ import { buildQuotedBody } from '@/emailParser'
 import api, { userRecoveryKeyStatus } from '@/api'
 import useSearchShortcut from '@/hooks/useSearchShortcut'
 
+// The editor (Tiptap) and the sending code load when a message is first written.
+const ComposeWindow = lazy(() => import('@/components/ComposeWindow'))
 const PAGE_SIZE = 20
 
 const AuthorizedLayout = () => {
@@ -868,6 +869,7 @@ const AuthorizedLayout = () => {
       />
 
       {composeOpen && (
+        <Suspense fallback={null}>
         <ComposeWindow
           myEmail={userEmail}
           onClose={handleComposeClose}
@@ -878,6 +880,7 @@ const AuthorizedLayout = () => {
           onScheduled={handleScheduled}
           replaceId={composeReplaceId}
         />
+        </Suspense>
       )}
 
       <UnlockModal

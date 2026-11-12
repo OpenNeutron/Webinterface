@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Bell } from 'lucide-react'
 import { pushStatus } from '@/api'
 import {
   disableNotifications,
@@ -73,11 +72,8 @@ export default function NotificationsSection() {
   }
 
   return (
-    <section className="mb-4 rounded-xl bg-secondary/60 p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <Bell size={16} className="text-muted-foreground" />
-        <h3 className="text-sm font-medium text-foreground/90">New mail notifications</h3>
-      </div>
+    // Settings gives this section its card and title; no second card or heading inside.
+    <section>
       <p className="mb-3 text-xs text-ink-3">
         Tells this browser when a message arrives, even when the app is closed. The
         notification says who it is from — never the subject or the message, because
