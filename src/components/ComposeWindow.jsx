@@ -19,6 +19,7 @@ import { TiptapEditor } from '@/components/compose/TiptapEditor'
 import { useSendEmail } from '@/hooks/useSendEmail'
 import { useAttachments } from '@/hooks/useAttachments'
 import { useResizable } from '@/hooks/useResizable'
+import { useVisualViewport } from '@/hooks/useVisualViewport'
 import { useIsPhone } from '@/hooks/useIsPhone'
 import { Lock, LockOpen } from 'lucide-react'
 import { listAliases } from '@/api'
@@ -70,6 +71,7 @@ function whenPresets() {
 const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = null, onDeleteDraft, onScheduled, replaceId = null }) => {
   const [minimized, setMinimized] = useState(false)
   const isPhone = useIsPhone()
+  const viewport = useVisualViewport(isPhone)
 
   const currentDraftId = useRef(draftId ?? ('draft_' + Date.now()))
 
@@ -542,7 +544,11 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
       className={`compose-window fixed z-50 flex flex-col bg-card border border-border shadow-2xl ${isPhone ? 'rounded-none border-0' : 'rounded-t-lg'}`}
       style={
         isPhone
-          ? { inset: 0, width: '100%', height: '100dvh' }
+          // Sized to what the keyboard leaves visible, so Send sits on top of the keyboard
+          // instead of under it. 100dvh where the browser cannot say.
+          ? (viewport
+            ? { top: viewport.top, left: 0, right: 0, width: '100%', height: viewport.height }
+            : { inset: 0, width: '100%', height: '100dvh' })
           : { bottom: 0, right: 24, width: minimized ? 320 : size.w, height: minimized ? 'auto' : size.h }
       }
     >
@@ -579,15 +585,16 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
           )}
           <button
             onClick={handleDiscard}
-            className="p-2 sm:p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+            className="flex items-center justify-center p-2 sm:p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors max-sm:size-11"
             title="Discard draft"
           >
             <Trash2 className="w-4 h-4" />
           </button>
           <button
             onClick={handleClose}
-            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors max-sm:size-11"
             title="Save draft & close"
+            aria-label="Save draft and close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -908,7 +915,8 @@ const ComposeWindow = ({ myEmail, onClose, onSent, replyData = null, draftId = n
               row with the buttons is what pushed Send off the right edge of a
               phone. On small screens the actions own a row and Send is pinned
               right, so it cannot be crowded out by text. */}
-          <div className="shrink-0 border-t border-border">
+          {/* The home indicator is not a place for Send: the footer clears it on a phone. */}
+          <div className="shrink-0 border-t border-border" style={isPhone ? { paddingBottom: 'env(safe-area-inset-bottom)' } : undefined}>
             {encryptionLine && (
               <p
                 className={`px-3 pt-2 text-[11px] leading-snug ${

@@ -100,7 +100,7 @@ const AuthorizedLayout = () => {
   const [needsUnlock, setNeedsUnlock] = useState(false)
   const [serverStatus, setServerStatus] = useState('checking')
 
-  const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore, fetchPreviewsFor } = useEmailFetch()
+  const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore, fetchPreviewsFor, reload, checkNew } = useEmailFetch()
   const { sentUids, setSentUids, fetchSentUids, fetchSentPreviews } = useSentEmails(setPreviews)
   // After a restore (Undo, or from Trash) the folders are read again: the server knows where
   // each message goes back to, in its order.
@@ -153,9 +153,41 @@ const AuthorizedLayout = () => {
     } catch {}
   }, [])
 
-  const handleRefresh = useCallback(() => {
-    fetchEmails(0)
-  }, [fetchEmails])
+  // Refresh reads the folder on screen. It used to read the inbox whatever was showing, so
+  // Refresh in Sent or Trash spun and changed nothing there.
+  const [refreshing, setRefreshing] = useState(false)
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      if (selectedFolder === 'sent') {
+        const sent = await fetchSentUids()
+        if (sent.length) await fetchSentPreviews(sent)
+      } else if (selectedFolder === 'trash') {
+        await trash.fetchTrash()
+      } else {
+        await reload()
+        if (selectedFolder !== 'inbox' && selectedFolder !== 'starred' && selectedFolder !== 'drafts') await fetchGroups()
+      }
+    } finally {
+      setRefreshing(false)
+    }
+  }, [selectedFolder, fetchSentUids, fetchSentPreviews, trash, reload, fetchGroups])
+
+  // New mail arrives without a tap: once a minute while the app is on screen, and at once when
+  // it comes back (a phone switching back to the tab, a laptop waking). Hidden tabs do not poll.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) checkNew()
+    }
+    const timer = setInterval(check, 60_000)
+    document.addEventListener('visibilitychange', check)
+    window.addEventListener('online', check)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', check)
+      window.removeEventListener('online', check)
+    }
+  }, [checkNew])
 
   useEffect(() => {
     checkServer()
@@ -612,14 +644,19 @@ const AuthorizedLayout = () => {
               className="absolute inset-0 bg-black/60"
               onClick={() => setNavOpen(false)}
             />
-            <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-border bg-background shadow-2xl">
+            {/* Clear of the notch and the home indicator when the app runs full-screen. */}
+            <div
+              className="absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-y-auto overscroll-contain border-r border-border bg-background shadow-2xl"
+              style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+            >
               {/* A drawer whose only exit is a tap on a dimmed strip or the system
                   back gesture strands anyone who does not know that gesture exists. */}
               <button
                 type="button"
                 onClick={() => setNavOpen(false)}
                 aria-label="Close folders"
-                className="absolute right-1.5 top-1.5 z-10 flex size-11 items-center justify-center rounded-md text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1"
+                style={{ top: 'calc(0.375rem + env(safe-area-inset-top))' }}
+                className="absolute right-1.5 z-10 flex size-11 items-center justify-center rounded-md text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1"
               >
                 <X className="size-5" />
               </button>
@@ -698,7 +735,7 @@ const AuthorizedLayout = () => {
                   if (next >= pageCount - 1 && hasMore) loadMore()
                 }}
                 onRefresh={handleRefresh}
-                refreshing={loading}
+                refreshing={loading || refreshing}
               />
               )}
               {selectedFolder === 'trash' && (
@@ -755,6 +792,7 @@ const AuthorizedLayout = () => {
                 groups={groups}
                 folderLabel={folderLabel}
                 selectedFolder={selectedFolder}
+                onRefresh={handleRefresh}
               />
             </div>
             {selectedUid && (

@@ -194,11 +194,26 @@ row (`180px 634px 72px`). Row height uniform at 81 px on a phone.
 *In the suite:* each fixture now carries a different date (today, −12 d, −400 d, −800 d),
 and the proof asserts one width and no wrap per viewport.
 
-**Slice 6 — Phone-specific affordances that do not exist yet.**
-Pull-to-refresh on the list; safe-area insets on the compose sheet footer and the
-drawer; a keyboard-avoiding compose body (`100dvh` minus the visual viewport, so the
-Send button is not under the iOS keyboard); swipe-to-archive only if it gets an
-undo — otherwise leave it out.
+**Slice 6 — Phone-specific affordances. DONE** (2026-11-12).
+Started from a real report: mail could not be deleted on a phone. A row's Delete lived in
+its hover actions, which a phone never shows; a conversation had no select box and its
+delete was hidden below 640 px; and a server without Trash answered every delete with a
+dead end. Now:
+
+- **Swipe left to delete, hold to select** (`SwipeRow`). Touch only; the row slides back
+  if the server refuses, and Delete moves to Trash with Undo, so the swipe has its undo.
+  Hover actions are hidden on coarse pointers, where they were invisible but tappable.
+- **Conversations select as one** (all / some / none), and swipe away as one.
+- **No Trash on the server** offers "delete for good?" instead of doing nothing.
+- **Pull to refresh** on the list (`usePullToRefresh`), with `overscroll-contain` so the
+  browser's own pull does not reload the app and drop the unlocked key.
+- **New mail without a tap**: checked once a minute while visible and on return to the
+  app; only new messages are fetched and decrypted, older pages stay loaded.
+- **Refresh reads the folder on screen** (it read the inbox in Sent and Trash too), and
+  starts Load older mail from the top again (it used to skip a page).
+- **Compose follows the visual viewport**, so Send rides on top of the keyboard instead of
+  under it; its footer and the drawer clear the safe-area insets; title-bar buttons 44 px.
+- The selection bar says "Delete" in words on a phone; its buttons and the reader's are 44 px.
 
 **Slice 7 — The proof, in CI. PARTLY DONE.**
 Today's measurements were run by hand. Add a `phone` leg to the proof runner: a
