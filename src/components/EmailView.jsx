@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,7 +39,9 @@ import { downloadAttachment } from '@/lib/utils'
 import { addressBook } from '@/addressBook'
 import { SenderAvatar } from '@/components/SenderAvatar'
 import { EmailBody } from '@/components/email/EmailBody'
-import { PgpAttachment, isPgpAttachment } from '@/components/email/PgpAttachment'
+import { isPgpAttachment } from '@/lib/pgpRing'
+// Decrypting an attachment needs the OpenPGP library; it loads when one is shown.
+const PgpAttachment = lazy(() => import('@/components/email/PgpAttachment').then((m) => ({ default: m.PgpAttachment })))
 import { AddressRow } from '@/components/email/AddressRow'
 import { copyWithToast } from '@/lib/toast'
 
@@ -469,7 +471,7 @@ const EmailView = ({
               <div className="flex flex-wrap gap-3">
                 {email.attachments.map((att, i) => (
                   isPgpAttachment(att) ? (
-                    <PgpAttachment key={i} att={att} />
+                    <Suspense key={i} fallback={null}><PgpAttachment att={att} /></Suspense>
                   ) : (
                   <div
                     key={i}

@@ -25,9 +25,7 @@ function armorFromAttachment(att) {
   }
 }
 
-export function isPgpAttachment(att) {
-  return /\.(asc|pgp|gpg)$/i.test(att?.name ?? '') || /pgp/i.test(att?.contentType ?? '')
-}
+export { isPgpAttachment } from '@/lib/pgpRing'
 
 /**
  * An attachment that arrived encrypted. It is a normal attachment on the wire,

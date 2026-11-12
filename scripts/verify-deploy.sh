@@ -15,12 +15,13 @@ if [ "$LOCAL" != "$SERVED" ]; then
 fi
 echo "ok  served hash $SERVED"
 
-BUNDLE=$(ssh "$DEPLOY_HOST" "ls -t /opt/on/data/static/assets/*.js | head -1")
 SW=$(ssh "$DEPLOY_HOST" "grep -o 'sloth-mail-shell-v[0-9]*' /opt/on/data/static/sw.js | head -1")
 echo "ok  service worker $SW"
 
+# The client is split into chunks (Settings, Compose and the OpenPGP reader load when they
+# are opened), so a marker can be in any of them: search them all.
 for m in "$@"; do
-  if ssh "$DEPLOY_HOST" "grep -q '$m' '$BUNDLE'"; then
+  if ssh "$DEPLOY_HOST" "grep -lq '$m' /opt/on/data/static/assets/*.js"; then
     echo "ok  marker present: $m"
   else
     echo "FAIL marker missing: $m"

@@ -3,7 +3,6 @@ import { storage } from '@/storage'
 import { keySession } from '@/keySession'
 import api from '@/api'
 import { decryptStored } from '@/lib/decryptStored'
-import { importAutocryptKey } from '@/pgp'
 import { parseEmail } from '@/emailParser'
 import { addressBook } from '@/addressBook'
 
@@ -57,7 +56,8 @@ export function useEmailFetch() {
           // lookup. Failures are silent by design: a bad header in one
           // message must not stop that message from loading.
           if (parsed?.autocrypt && parsed?.from?.email) {
-            importAutocryptKey(parsed.autocrypt, parsed.from.email).catch(() => {})
+            // Loads the OpenPGP library only for mail that actually carries a key.
+            import('@/pgp').then((m) => m.importAutocryptKey(parsed.autocrypt, parsed.from.email)).catch(() => {})
           }
           addressBook.addAll(parsed?.from ? [parsed.from] : [])
           addressBook.addAll(parsed?.to ?? [])

@@ -12,10 +12,12 @@ import { EmailBody } from '@/components/email/EmailBody'
 const ARMOR = '-----BEGIN PGP MESSAGE-----\n\nhQEMA...\n-----END PGP MESSAGE-----'
 
 describe('EmailBody with encrypted mail', () => {
-  it('routes armour to the PGP reader even when an htmlBody exists', () => {
+  it('routes armour to the PGP reader even when an htmlBody exists', async () => {
     render(<EmailBody textBody={ARMOR} htmlBody={`<div>${ARMOR}</div>`} senderHint="tibs@slothlee.xyz" />)
+    // The reader loads with the OpenPGP library; until then it says so, never the ciphertext.
+    expect(screen.getByText(/Opening the encrypted message/)).toBeTruthy()
     // The PGP reader asks for the passphrase rather than showing ciphertext.
-    expect(screen.getByText(/PGP passphrase/i)).toBeTruthy()
+    expect(await screen.findByText(/PGP passphrase/i)).toBeTruthy()
     // PgpBody also shows the original armour beneath the prompt, deliberately:
     // it lets someone verify what was actually received.
     expect(screen.getByText(/BEGIN PGP MESSAGE/)).toBeTruthy()

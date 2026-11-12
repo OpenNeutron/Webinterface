@@ -9,7 +9,6 @@ import { loginSecondFactor, loginSecurityKeyBegin, loginSecurityKeyFinish } from
 import { getAssertion, describeKeyError, securityKeyProblem } from '@/lib/webauthn'
 import { enablePostQuantum, loadPostQuantumKey } from '@/lib/pqSetup'
 import { hashPassword, generateKeyPair, exportPublicKeyBase64, encryptPrivateKey, decryptPrivateKey, hasSubtleCrypto } from '@/crypto'
-import { syncIdentityWithAccount } from '@/lib/pgpAccount'
 import RecoveryKeySetup from '@/components/RecoveryKeySetup'
 import { keySession } from '@/keySession'
 import { Mail } from 'lucide-react'
@@ -137,6 +136,8 @@ const Login = () => {
         // device recovers its key and where a key created before this shipped is first
         // uploaded. It must never block or fail the sign-in itself.
         try {
+          // Loaded here, not with the page: it brings the OpenPGP library (~390 kB).
+          const { syncIdentityWithAccount } = await import('@/lib/pgpAccount')
           const sync = await syncIdentityWithAccount(passwordUsed)
           // Always say what happened: a silent 'in-step' is indistinguishable from a
           // sync that never ran, which is exactly how this hid the first time.
