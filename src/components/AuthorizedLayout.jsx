@@ -110,7 +110,7 @@ const AuthorizedLayout = () => {
     if (sent.length) await fetchSentPreviews(sent)
   }, [fetchEmails, fetchSentUids, fetchSentPreviews])
   const trash = useTrash({ fetchPreviewsFor, fetchSentPreviews, setPreviews, onRestored: reloadFolders })
-  const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoLast, moveToGroup, removeFromGroup } = useEmailActions({
+  const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoLast, moveToGroup, removeFromGroup, forget } = useEmailActions({
     emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups, setSentUids,
     onTrashed: trash.addTrashed,
     onRestored: async (back) => {
@@ -306,6 +306,20 @@ const AuthorizedLayout = () => {
     })
   }
 
+  // A conversation is selected as one: if every message in it is checked, the press clears them;
+  // otherwise it checks them all.
+  const handleCheckThread = (list) => {
+    setCheckedUids((prev) => {
+      const next = new Set(prev)
+      const all = list.every((uid) => next.has(uid))
+      for (const uid of list) {
+        if (all) next.delete(uid)
+        else next.add(uid)
+      }
+      return next
+    })
+  }
+
   const handleToggleSelectAll = () => {
     // Page-scoped, and it does not throw away a selection made on another page: the control says
     // "select all N on this page", so it must mean exactly that.
@@ -350,7 +364,13 @@ const AuthorizedLayout = () => {
       setModalState({ type: 'delete-forever', uids: list })
       return
     }
-    const { gone, failed } = await deleteMany(list)
+    const { gone, failed, missingRoute } = await deleteMany(list)
+    // A server without Trash moved nothing. Say so and offer the delete it can do, rather than a
+    // delete button that does nothing.
+    if (missingRoute && !gone.length) {
+      setModalState({ type: 'delete-forever', uids: list, noTrash: true })
+      return list
+    }
     openNeighbour(gone)
     return failed
   }
@@ -375,7 +395,12 @@ const AuthorizedLayout = () => {
     if (selectedFolder === 'trash') return setModalState({ type: 'delete-forever', uids: [uid] })
     const next = neighbourAfterRemoval(listOrder, [uid])
     const wasOpen = String(selectedUid) === String(uid)
-    if (await deleteEmail(uid) && wasOpen) {
+    const outcome = await deleteEmail(uid)
+    if (outcome === 'no-trash') {
+      setModalState({ type: 'delete-forever', uids: [uid], noTrash: true })
+      return
+    }
+    if (outcome && wasOpen) {
       const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
       setSelectedUid(wide ? next : null)
     }
@@ -715,6 +740,7 @@ const AuthorizedLayout = () => {
                 checkedUids={checkedUids}
                 onSelect={handleSelect}
                 onCheck={handleCheck}
+                onCheckThread={handleCheckThread}
                 loading={loading}
                 hasMore={selectedFolder === 'inbox' && hasMore}
                 onLoadMore={loadMore}
@@ -836,12 +862,14 @@ const AuthorizedLayout = () => {
         isOpen={modalState.type === 'delete-forever'}
         onClose={() => setModalState({ type: null })}
         title="Delete for good"
-        description={`Delete ${modalState.uids?.length === 1 ? 'this message' : `${modalState.uids?.length ?? 0} messages`} for good? This cannot be undone.`}
+        description={`${modalState.noTrash ? 'This mail server has no Trash yet, so a delete cannot be taken back. ' : ''}Delete ${modalState.uids?.length === 1 ? 'this message' : `${modalState.uids?.length ?? 0} messages`} for good? This cannot be undone.`}
         confirmText={modalState.uids?.length === 1 ? 'Delete for good' : `Delete ${modalState.uids?.length ?? 0} for good`}
         onConfirm={async () => {
           const list = modalState.uids ?? []
           setModalState({ type: null })
-          const { gone, failed } = await trash.deleteForever(list)
+          const { gone, failed } = await trash.deleteForever(list, { sentUids })
+          // Off every list the screen holds, not only the trash's.
+          if (gone.length) forget(gone)
           setCheckedUids(new Set(failed))
           openNeighbour(gone)
         }}

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Minus, Trash2 } from 'lucide-react'
 import EmptyArt from '@/components/EmptyArt'
 import { EmailListItem, EmailRowSkeleton, dayBucket, rowTime } from '@/components/email/EmailListItem'
 import { buildThreads } from '@/lib/threads'
 import { SenderAvatar } from '@/components/SenderAvatar'
+import { SwipeRow } from '@/components/email/SwipeRow'
 
 const EmailList = ({
   searchQuery = '',
@@ -15,6 +16,8 @@ const EmailList = ({
   checkedUids,
   onSelect,
   onCheck,
+  // Selects (or clears) every message in a conversation at once.
+  onCheckThread = null,
   loading,
   hasMore,
   onLoadMore,
@@ -89,6 +92,13 @@ const EmailList = ({
     selectedFolder,
   })
 
+  // In Trash a delete is for good (and asks first); everywhere else it moves to Trash.
+  const swipeLabel = selectedFolder === 'trash' ? 'Delete for good' : 'Delete'
+  const toggleThread = (uids) => {
+    if (onCheckThread) onCheckThread(uids)
+    else uids.forEach((uid) => onCheck(uid))
+  }
+
   const showSkeleton = loading && threads.length === 0
   const showEmpty = !loading && threads.length === 0
 
@@ -141,9 +151,15 @@ const EmailList = ({
             {group.items.map((thread) => {
               if (thread.count === 1) {
                 return (
-                  <div key={thread.latestUid} className="border-b border-line/70">
+                  <SwipeRow
+                    key={thread.latestUid}
+                    className="border-b border-line/70"
+                    label={swipeLabel}
+                    onSwipe={() => onDeleteEmail(thread.latestUid)}
+                    onLongPress={() => onCheck(thread.latestUid)}
+                  >
                     <EmailListItem {...rowProps(thread.latestUid)} isFresh={fresh.has(thread.latestUid)} />
-                  </div>
+                  </SwipeRow>
                 )
               }
 
@@ -151,79 +167,130 @@ const EmailList = ({
               const latest = previews[thread.latestUid] || {}
               const selectedInThread = thread.uids.includes(selectedUid)
               const participants = thread.participants.slice(0, 3).join(', ')
+              const checkedCount = thread.uids.filter((uid) => checkedUids?.has(uid)).length
+              const allChecked = checkedCount === thread.uids.length
+              const toggleOpen = () => {
+                setExpandedThreads((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(thread.key)) next.delete(thread.key)
+                  else next.add(thread.key)
+                  return next
+                })
+                onSelect(thread.latestUid)
+              }
 
               return (
                 <div key={thread.key} data-testid="thread-group" className="group/thread relative border-b border-line/70">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExpandedThreads((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(thread.key)) next.delete(thread.key)
-                        else next.add(thread.key)
-                        return next
-                      })
-                      onSelect(thread.latestUid)
-                    }}
-                    className={`relative flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-120 ${
-                      selectedInThread ? 'bg-primary/[0.07]' : 'hover:bg-accent'
-                    }`}
+                  <SwipeRow
+                    label={swipeLabel}
+                    onSwipe={onDeleteThread ? () => onDeleteThread(thread.uids) : null}
+                    onLongPress={() => toggleThread(thread.uids)}
                   >
-                    <span
-                      aria-hidden="true"
-                      className={`absolute inset-y-0 left-0 w-[2px] ${
-                        selectedInThread ? 'bg-primary' : 'bg-transparent'
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={open}
+                      onClick={toggleOpen}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          toggleOpen()
+                        }
+                      }}
+                      className={`relative flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors duration-120 ${
+                        checkedCount ? 'bg-sand/10' : selectedInThread ? 'bg-primary/[0.07]' : 'hover:bg-accent'
                       }`}
-                    />
-                    <span className="w-4 shrink-0 text-ink-3">
-                      {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                    </span>
-                    <SenderAvatar from={latest.from} isSelected={selectedInThread} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline gap-2">
-                        <span
-                          className={`truncate text-[13.5px] ${
-                            thread.unreadCount > 0 ? 'font-semibold text-ink-1' : 'text-ink-2'
-                          }`}
-                        >
-                          {thread.participants.length > 1
-                            ? participants
-                            : thread.participants[0] || 'Unknown sender'}
-                        </span>
-                        <span className="mono shrink-0 rounded bg-secondary px-1.5 text-[10.5px] text-ink-2">
-                          {thread.count}
-                        </span>
-                        <span className="mono ml-auto shrink-0 pl-2 text-[11.5px] text-ink-3">
-                          {rowTime(latest.date)}
-                        </span>
-                      </span>
-                      <span className="mt-0.5 block truncate text-[13px] text-ink-2">
-                        {thread.subject}
-                      </span>
-                      {latest.preview && (
-                        <span className="mt-0.5 block truncate text-[12.5px] text-ink-3">
-                          {latest.preview}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                  {onDeleteThread && (
-                    /* Over the time, like a single row's actions: hovering moves nothing. */
-                    <button
-                      type="button"
-                      onClick={() => onDeleteThread(thread.uids)}
-                      className="absolute right-3 top-3 rounded-md border border-line bg-card/95 p-1.5 text-ink-3 opacity-0 shadow-sm transition-opacity duration-120 hover:text-destructive focus-visible:opacity-100 group-hover/thread:opacity-100 max-sm:hidden"
-                      title={`Delete all ${thread.count} messages in this conversation`}
-                      aria-label={`Delete conversation (${thread.count} messages)`}
                     >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  )}
+                      <span
+                        aria-hidden="true"
+                        className={`absolute inset-y-0 left-0 w-[2px] ${
+                          selectedInThread ? 'bg-primary' : 'bg-transparent'
+                        }`}
+                      />
+                      {/* The same box, in the same column, as a single message: a conversation
+                          could not be selected before, so it could not be deleted in bulk. */}
+                      <div className="flex w-4 shrink-0 items-center justify-center self-stretch max-sm:w-11">
+                        <button
+                          type="button"
+                          aria-label={allChecked
+                            ? `Unselect conversation (${thread.count} messages)`
+                            : `Select conversation (${thread.count} messages)`}
+                          aria-pressed={allChecked}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleThread(thread.uids)
+                          }}
+                          className="flex items-center justify-center max-sm:min-h-11 max-sm:min-w-11"
+                        >
+                          <span
+                            className={`flex size-4 items-center justify-center rounded border transition-all duration-120 max-sm:size-5 ${
+                              checkedCount ? 'border-primary bg-primary' : 'border-ink-4/60 hover:border-ink-2'
+                            }`}
+                          >
+                            {allChecked && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}
+                            {checkedCount > 0 && !allChecked && <Minus className="size-2.5 text-primary-foreground" strokeWidth={3} />}
+                          </span>
+                        </button>
+                      </div>
+                      <SenderAvatar from={latest.from} isSelected={selectedInThread} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-2">
+                          <span
+                            className={`truncate text-[13.5px] ${
+                              thread.unreadCount > 0 ? 'font-semibold text-ink-1' : 'text-ink-2'
+                            }`}
+                          >
+                            {thread.participants.length > 1
+                              ? participants
+                              : thread.participants[0] || 'Unknown sender'}
+                          </span>
+                          <span className="mono flex shrink-0 items-center gap-0.5 self-center rounded bg-secondary pl-1.5 pr-0.5 text-[10.5px] text-ink-2">
+                            {thread.count}
+                            {open ? <ChevronDown className="size-3" aria-hidden="true" /> : <ChevronRight className="size-3" aria-hidden="true" />}
+                          </span>
+                          <span className="mono ml-auto shrink-0 pl-2 text-[11.5px] text-ink-3">
+                            {rowTime(latest.date)}
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-[13px] text-ink-2">
+                          {thread.subject}
+                        </span>
+                        {latest.preview && (
+                          <span className="mt-0.5 block truncate text-[12.5px] text-ink-3">
+                            {latest.preview}
+                          </span>
+                        )}
+                      </span>
+                      {onDeleteThread && (
+                        /* Over the time, like a single row's actions: hovering moves nothing. A
+                           finger swipes instead, so there is no invisible button to hit. */
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDeleteThread(thread.uids)
+                          }}
+                          className="absolute right-3 top-3 rounded-md border border-line bg-card/95 p-1.5 text-ink-3 opacity-0 shadow-sm transition-opacity duration-120 hover:text-destructive focus-visible:opacity-100 group-hover/thread:opacity-100 pointer-coarse:hidden"
+                          title={`Delete all ${thread.count} messages in this conversation`}
+                          aria-label={`Delete conversation (${thread.count} messages)`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </SwipeRow>
 
                   {open && (
                     <div className="ml-4 border-l border-line">
                       {thread.uids.map((uid) => (
-                        <EmailListItem key={uid} {...rowProps(uid)} isFresh={fresh.has(uid)} />
+                        <SwipeRow
+                          key={uid}
+                          label={swipeLabel}
+                          onSwipe={() => onDeleteEmail(uid)}
+                          onLongPress={() => onCheck(uid)}
+                        >
+                          <EmailListItem {...rowProps(uid)} isFresh={fresh.has(uid)} />
+                        </SwipeRow>
                       ))}
                     </div>
                   )}

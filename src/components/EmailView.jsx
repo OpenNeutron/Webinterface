@@ -230,7 +230,7 @@ const EmailView = ({
             onClick={() => (isUnread ? onMarkRead(uid) : onMarkUnread(uid))}
             variant="ghost"
             size="icon"
-            className="size-8 text-ink-3 hover:bg-accent hover:text-ink-1"
+            className="size-8 text-ink-3 hover:bg-accent hover:text-ink-1 max-sm:size-11"
             title={isUnread ? 'Mark as read' : 'Mark as unread'}
           >
             {isUnread ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
@@ -240,7 +240,7 @@ const EmailView = ({
             onClick={() => onToggleStar(uid)}
             variant="ghost"
             size="icon"
-            className={`size-8 hover:bg-accent ${isStarred ? 'text-sand' : 'text-ink-3 hover:text-sand'}`}
+            className={`size-8 max-sm:size-11 hover:bg-accent ${isStarred ? 'text-sand' : 'text-ink-3 hover:text-sand'}`}
             title={isStarred ? 'Unstar' : 'Star'}
           >
             <Star className={`size-4 ${isStarred ? 'fill-current' : ''}`} />
@@ -253,7 +253,7 @@ const EmailView = ({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-8 text-ink-3 hover:bg-accent hover:text-ink-1"
+                className="size-8 text-ink-3 hover:bg-accent hover:text-ink-1 max-sm:size-11"
                 title="More"
               >
                 <MoreHorizontal className="size-4" />
@@ -303,7 +303,7 @@ const EmailView = ({
             onClick={() => onDeleteEmail(uid)}
             variant="ghost"
             size="icon"
-            className="size-8 text-ink-3 hover:bg-destructive/10 hover:text-destructive"
+            className="size-8 text-ink-3 hover:bg-destructive/10 hover:text-destructive max-sm:size-11"
             title={onRestore ? 'Delete for good' : 'Delete (moves to Trash)'}
             aria-label={onRestore ? 'Delete for good' : 'Delete'}
           >

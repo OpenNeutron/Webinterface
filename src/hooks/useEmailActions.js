@@ -116,11 +116,7 @@ export function useEmailActions({
     return { gone, failed, missingRoute }
   }
 
-  const trashedToast = (gone, failed, missingRoute) => {
-    if (missingRoute && !gone.length) {
-      toast('Nothing was deleted: this mail server needs its update for Trash.')
-      return
-    }
+  const trashedToast = (gone, failed) => {
     const n = gone.length
     const head = n === 1 ? 'Moved to Trash' : `Moved ${n} to Trash`
     const tail = failed.length ? ` ${failed.length} could not be moved — still selected.` : ''
@@ -138,23 +134,33 @@ export function useEmailActions({
     toast(list.length === 1 ? 'Restored' : `Restored ${list.length}`)
   }
 
-  /** Delete one message (to Trash, with Undo). Returns true when it moved. */
+  /**
+   * Delete one message (to Trash, with Undo). Returns true when it moved, 'no-trash' when this
+   * server has no Trash (the caller offers to delete for good instead), false when refused.
+   */
   const deleteEmail = async (uid) => {
     const { gone, failed, missingRoute } = await trashMany([uid])
     if (!gone.length) {
-      toast(missingRoute
-        ? 'Nothing was deleted: this mail server needs its update for Trash.'
-        : 'That message was not deleted — the server refused. It is still here.')
+      if (missingRoute) return 'no-trash'
+      toast('That message was not deleted — the server refused. It is still here.')
       return false
     }
-    trashedToast(gone, failed, missingRoute)
+    trashedToast(gone, failed)
     return true
   }
 
-  /** Delete several (to Trash, with one Undo for all). */
+  /**
+   * Delete several (to Trash, with one Undo for all). A server with no Trash moves nothing and
+   * says so with `missingRoute`; the caller offers to delete for good instead of pretending.
+   */
   const deleteMany = async (list) => {
     const outcome = await trashMany(list)
-    if (outcome.gone.length || outcome.missingRoute) trashedToast(outcome.gone, outcome.failed, outcome.missingRoute)
+    if (outcome.gone.length) trashedToast(outcome.gone, outcome.failed)
+    else if (outcome.failed.length && !outcome.missingRoute) {
+      toast(outcome.failed.length === 1
+        ? 'That message was not deleted — the server refused. It is still here.'
+        : `None of the ${outcome.failed.length} were deleted — the server refused. They are still here.`)
+    }
     return outcome
   }
 
@@ -188,5 +194,5 @@ export function useEmailActions({
     ))
   }
 
-  return { patchMeta, markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoTrash, undoLast, moveToGroup, removeFromGroup }
+  return { patchMeta, markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoTrash, undoLast, moveToGroup, removeFromGroup, forget }
 }
