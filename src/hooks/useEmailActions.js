@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import api from '@/api'
 import { storage } from '@/storage'
 import { toast } from '@/lib/toast'
@@ -25,6 +26,8 @@ export function useEmailActions({
   }
 
   const headers = () => ({ Authorization: `Bearer ${storage.getToken()}` })
+  // The last delete that can still be taken back, for the Z shortcut.
+  const lastTrashed = useRef([])
 
   const markRead = async (uid) => {
     if (emailMeta[uid]?.unread === false) return
@@ -77,6 +80,7 @@ export function useEmailActions({
 
   /** Put trashed messages back: one restore each, then the folders are read again from the server. */
   const undoTrash = async (list) => {
+    if (lastTrashed.current === list) lastTrashed.current = []
     const failed = []
     await Promise.all(list.map(async (uid) => {
       try { await restoreMessage(uid) } catch { failed.push(uid) }
@@ -107,6 +111,7 @@ export function useEmailActions({
     if (gone.length) {
       forget(gone)
       onTrashed(moved)
+      lastTrashed.current = gone
     }
     return { gone, failed, missingRoute }
   }
@@ -120,6 +125,17 @@ export function useEmailActions({
     const head = n === 1 ? 'Moved to Trash' : `Moved ${n} to Trash`
     const tail = failed.length ? ` ${failed.length} could not be moved — still selected.` : ''
     toast(`${head}.${tail}`, { action: { label: 'Undo', run: () => undoTrash(gone) } })
+  }
+
+  /** Z: take back the last delete, if there is one to take back. */
+  const undoLast = async () => {
+    const list = lastTrashed.current
+    if (!list.length) {
+      toast('Nothing to undo.')
+      return
+    }
+    await undoTrash(list)
+    toast(list.length === 1 ? 'Restored' : `Restored ${list.length}`)
   }
 
   /** Delete one message (to Trash, with Undo). Returns true when it moved. */
@@ -172,5 +188,5 @@ export function useEmailActions({
     ))
   }
 
-  return { patchMeta, markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoTrash, moveToGroup, removeFromGroup }
+  return { patchMeta, markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoTrash, undoLast, moveToGroup, removeFromGroup }
 }

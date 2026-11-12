@@ -73,4 +73,17 @@ describe('EmailList threading render', () => {
     render(<EmailList {...props} uids={['a', 'b']} />)
     expect(screen.getByTestId('thread-group')).toBeTruthy()
   })
+
+  it('deletes a whole conversation from its row', () => {
+    const onDeleteThread = vi.fn()
+    render(<EmailList {...props} onDeleteThread={onDeleteThread} />)
+    fireEvent.click(screen.getByRole('button', { name: /Delete conversation \(2 messages\)/ }))
+    expect(onDeleteThread).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']))
+    expect(onDeleteThread.mock.calls[0][0]).toHaveLength(2)
+  })
+
+  it('offers no conversation delete where the folder cannot delete', () => {
+    render(<EmailList {...props} />)
+    expect(screen.queryByRole('button', { name: /Delete conversation/ })).toBeNull()
+  })
 })
