@@ -1,35 +1,93 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #1c1e26;
-  --color-foreground: #e5e7eb;
+  /* Sloth Lee: deep forest at dusk, moss for action, warm cream ink.
+     Colours are declared once, here. Anything outside this block that writes a
+     raw colour is a defect — see docs/UI-CONCEPT.md. */
+  --color-background: #10150f;
+  --color-foreground: #e9eee0;
 
-  --color-card: #23252f;
-  --color-card-foreground: #e5e7eb;
+  --color-card: #161c15;
+  --color-card-foreground: #e9eee0;
 
-  --color-popover: #23252f;
-  --color-popover-foreground: #e5e7eb;
+  --color-popover: #171d16;
+  --color-popover-foreground: #e9eee0;
 
-  --color-primary: #0d9488;
-  --color-primary-foreground: #ffffff;
+  --color-primary: #86bf6a;
+  --color-primary-foreground: #0d1309;
 
-  --color-secondary: #2a2d38;
-  --color-secondary-foreground: #e5e7eb;
+  --color-secondary: #1f261d;
+  --color-secondary-foreground: #e9eee0;
 
-  --color-muted: #2a2d38;
-  --color-muted-foreground: #9ca3af;
+  --color-muted: #1f261d;
+  --color-muted-foreground: #aab7a2;
 
-  --color-accent: #23252f;
-  --color-accent-foreground: #f5f5f5;
+  --color-accent: #1b2318;
+  --color-accent-foreground: #eef2e6;
 
-  --color-destructive: #ef4444;
+  --color-destructive: #e0593f;
   --color-destructive-foreground: #ffffff;
 
-  --color-border: #2a2d38;
-  --color-input: #2a2d38;
-  --color-ring: #0d9488;
+  --color-border: #27301f;
+  --color-input: #27301f;
+  --color-ring: #86bf6a;
 
-  --radius: 0.375rem;
+  /* The ink ramp. Secondary text is a colour, never an opacity: stacked
+     opacity measured below 4.5:1 against these grounds. */
+  --color-ink-1: #e9eee0;
+  --color-ink-2: #b6c2ab;
+  --color-ink-3: #98a68e;
+  --color-ink-4: #6f7d66;
+
+  /* Attention that is not an error (a setup gap), and the hairline everything
+     sits on. */
+  --color-sand: #c8a17a;
+  --color-line: #232b1d;
+  --color-line-strong: #2f3927;
+  /* Fields sit *below* the card they are on, so an input never disappears into
+     the surface behind it. */
+  --color-field: #0e130d;
+
+  --radius: 0.625rem;
+
+  /* Serif is the voice; sans is the machinery; mono is for things that align. */
+  --font-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Two keyframes exist in this app. Adding a third is a decision, not a habit. */
+  --animate-rise: rise 180ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-breathe: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+:root {
+  /* Four durations, each with one job. */
+  --m-press: 90ms;
+  --m-state: 120ms;
+  --m-enter: 180ms;
+  --m-panel: 240ms;
+  --m-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 @layer base {
@@ -39,6 +97,19 @@
   body {
     @apply bg-background text-foreground antialiased;
     cursor: default;
+    font-family: var(--font-sans);
+    /* Soft light through a forest canopy: keeps large dark areas from reading flat. */
+    background-image:
+      radial-gradient(1100px 560px at 15% -10%, rgba(134, 191, 106, 0.08), transparent 62%),
+      radial-gradient(900px 520px at 105% 5%, rgba(200, 161, 122, 0.06), transparent 58%);
+    background-attachment: fixed;
+  }
+  ::placeholder {
+    color: var(--color-ink-3);
+    opacity: 1;
+  }
+  ::selection {
+    background: rgba(134, 191, 106, 0.28);
   }
   button, [role="button"], input[type="submit"], input[type="button"] {
     cursor: pointer;
@@ -46,36 +117,277 @@
   button:disabled, [role="button"][aria-disabled="true"] {
     cursor: not-allowed;
   }
+  /* One focus treatment for the whole app: moss, offset, only for keyboards. */
+  :where(button, a, input, textarea, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* Screen titles and the wordmark share one voice. */
+  .display {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+    line-height: 1.12;
+    font-weight: 500;
+  }
+  .label {
+    font-size: 11px;
+    font-weight: 550;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+  .mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(233, 238, 224, 0.12);
     border-radius: 10px;
-    border: 2px solid transparent;
+    border: 3px solid transparent;
     background-clip: content-box;
   }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+  :root[data-theme='light'] {
+  scrollbar-color: #c2c8b8 transparent;
+}
+:root[data-theme='light'] .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(25, 29, 24, 0.18);
+  background-clip: content-box;
+}
+:root[data-theme='light'] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(25, 29, 24, 0.28);
+  background-clip: content-box;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(233, 238, 224, 0.22);
+    background-clip: content-box;
   }
 
   /* HTML email body rendering */
-  .email-html-body { font-size: 0.875rem; line-height: 1.6; }
-  .email-html-body p { margin: 0.25em 0; }
-  .email-html-body ul, .email-html-body ol { margin: 0.5em 0; padding-left: 1.5em; }
-  .email-html-body li { margin: 0.15em 0; }
-  .email-html-body a { color: var(--color-primary); text-decoration: underline; }
-  .email-html-body strong, .email-html-body b { font-weight: 600; }
-  .email-html-body em, .email-html-body i { font-style: italic; }
-  .email-html-body u { text-decoration: underline; }
-  .email-html-body s, .email-html-body del { text-decoration: line-through; }
-  .email-html-body blockquote { border-left: 2px solid rgba(229,231,235,0.2); padding-left: 0.75em; margin: 0.5em 0; opacity: 0.6; }
-  .email-html-body img { max-width: 100%; height: auto; }
+  /* The fit wrapper is the column. The message inside is allowed to be its natural
+     width so it can be measured and scaled; without that the cap below would clamp it
+     to the column and there would be nothing left to measure. */
+  .email-html-fit {
+    max-width: calc(100vw - 3rem);
+    min-width: 0;
+    overflow-x: auto;
+    /* Mail is a document on paper. Transactional mail paints its own white card and
+       leaves the text colour unset, so inheriting the app's light ink put black-on-
+       white copy at 1:1 — an Instagram code rendered invisible. The sheet is white
+       and the default ink is dark; a sender's own colours still win, which is why
+       dark newsletters keep their dark background and light type. */
+    background: #ffffff;
+    border-radius: 2px;
+  }
+  /* The message is its own document now: it brings its own stylesheet, its own
+     layout width and its own paper. The app only decides where it sits and holds it
+     to the column — see EmailBody.jsx for why it stopped being inline HTML. */
+  .email-html-fit .email-html-body {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    border: 0;
+    background: #ffffff;
+    transform-origin: top left;
+  }
+}
+
+/* Phones: the compose window carries inline pixel geometry for desktop resizing,
+   so overriding here (not in the component) keeps that behaviour intact. */
+@media (max-width: 767px) {
+  .compose-window {
+    left: 0 !important;
+    right: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+  }
+}
+
+/* Installed app: keep the chrome clear of the notch and the home indicator. */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* One block that freezes every duration and both keyframes. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --m-press: 1ms;
+    --m-state: 1ms;
+    --m-enter: 1ms;
+    --m-panel: 1ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Appearance
+
+   One palette swap, no component knows about it: every colour in the app comes
+   from the tokens above, so a theme is a block of overrides and nothing else.
+   --------------------------------------------------------------------------- */
+:root[data-theme='light'] {
+  --color-background: #f6f6f0;
+  --color-foreground: #191d18;
+
+  --color-card: #ffffff;
+  --color-card-foreground: #191d18;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #191d18;
+
+  --color-primary: #3f7a2d;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #eaede2;
+  --color-secondary-foreground: #191d18;
+
+  --color-muted: #eceee5;
+  --color-muted-foreground: #4a5343;
+
+  --color-accent: #e8ebe0;
+  --color-accent-foreground: #14180f;
+
+  --color-destructive: #b0341c;
+  --color-destructive-foreground: #ffffff;
+
+  --color-border: #dcdfd2;
+  --color-input: #dcdfd2;
+  --color-ring: #3f7a2d;
+
+  --color-ink-1: #191d18;
+  --color-ink-2: #454e3f;
+  --color-ink-3: #55604e;
+  --color-ink-4: #6f7a67;
+
+  --color-sand: #8a6134;
+  --color-line: #ced3c1;
+  --color-line-strong: #a7ae99;
+  --color-field: #fbfbf7;
+}
+
+:root[data-theme='light'] body {
+  background-image:
+    radial-gradient(1100px 560px at 15% -10%, rgba(63, 122, 45, 0.06), transparent 62%),
+    radial-gradient(900px 520px at 105% 5%, rgba(138, 97, 52, 0.05), transparent 58%);
+}
+
+/* Density: the same rows, less air. Nothing reorders, nothing hides. */
+:root[data-density='compact'] .mail-row {
+  padding-top: 0.4375rem;
+  padding-bottom: 0.4375rem;
+}
+:root[data-density='compact'] .mail-row-snippet {
+  display: none;
+}
+
+/* Settings on a phone: everything you can press is at least 44 px tall. The
+   section strip is a scroller with no visible bar, so it does not push the
+   content down or read as a progress indicator. */
+@media (max-width: 767px) {
+  .settings-scope button,
+  .settings-scope input,
+  .settings-scope textarea,
+  .settings-scope select,
+  .settings-scope nav a {
+    min-height: 44px;
+  }
+}
+.settings-scope nav {
+  scrollbar-width: none;
+}
+.settings-scope nav::-webkit-scrollbar {
+  display: none;
+}
+
+/* Auth on a phone: a field you can hit, and a Show control that is not 14px tall. */
+@media (max-width: 767px) {
+  .auth-scope input { min-height: 44px; }
+  .auth-scope form button { min-height: 44px; }
+  /* the reveal control lives inside the field, so it stays compact */
+  .auth-scope .pw-toggle { min-height: 30px; }
+}
+
+/* ── Motion that earns its place ────────────────────────────────────────────
+   Four moments move, and nothing else does. The test each one had to pass:
+   it tells you something happened. A row arriving says "this is new"; the dot
+   settling says "you have read it"; the sheet rising says "this came from the
+   bottom of the screen"; content fading in says "the wait is over". Decoration
+   for its own sake stays out — a mailbox you read every day should not perform.
+   All of it is off under prefers-reduced-motion, below. */
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(-5px); background-color: color-mix(in oklab, var(--color-primary) 7%, transparent); }
+  to   { opacity: 1; transform: none; }
+}
+.row-in { animation: row-in .34s cubic-bezier(.2, .7, .2, 1) both; }
+
+@keyframes sheet-up {
+  from { opacity: .6; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sheet-pop {
+  from { opacity: 0; transform: translateY(8px) scale(.99); }
+  to   { opacity: 1; transform: none; }
+}
+.compose-window { animation: sheet-pop .2s cubic-bezier(.2, .7, .2, 1) both; }
+@media (max-width: 639px) {
+  .compose-window { animation: sheet-up .26s cubic-bezier(.2, .7, .2, 1) both; }
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+.toast-in { animation: toast-in .22s cubic-bezier(.2, .7, .2, 1) both; }
+
+@media (max-width: 639px) {
+  /* A control whose only content is an icon is a thumb target, not a glyph.
+     The icon keeps its size; the box around it grows to the 44px floor, because
+     padding on a 16px glyph still leaves a 16px hit rect reading as "does nothing"
+     when the thumb lands a few pixels wide. Text buttons are untouched — their
+     width comes from the label. */
+  button:has(> svg:only-child) {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-in, .compose-window, .toast-in { animation: none !important; }
 }

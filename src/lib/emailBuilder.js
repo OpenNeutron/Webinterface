@@ -24,9 +24,15 @@ function buildHeaders({ from, to, cc, subject, date, messageId, inReplyTo, refer
     ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []),
     `Subject: ${encodeRfc2047Word(subject) || '(no subject)'}`,
     'MIME-Version: 1.0',
-    'X-Mailer: OpenNeutron',
+    'X-Mailer: Sloth Lee Mail',
     ...(e2ee ? ['OpenNeutron-E2EE: true'] : []),
   ]
+}
+
+function asDocument(body) {
+  const html = body || ''
+  if (/<html[\s>]/i.test(html)) return html
+  return `<!DOCTYPE html>\r\n<html><body>${html}</body></html>`
 }
 
 function buildTextPart(body, boundary) {
@@ -35,7 +41,7 @@ function buildTextPart(body, boundary) {
     'Content-Type: text/html; charset=UTF-8',
     'Content-Transfer-Encoding: 8bit',
     '',
-    body || '',
+    asDocument(body),
   ].join('\r\n')
 }
 
@@ -56,7 +62,10 @@ export function buildEmail({ from, to = [], cc = [], subject, body = '', attachm
   const now    = new Date()
   const ts     = now.getTime()
   const rand   = makeRand()
-  const domain = from?.split('@')[1] ?? 'localhost'
+  // 'from' may be a formatted address like `"Tibs" <tibs@slothlee.xyz>`, so take
+  // the domain from inside the angle brackets — splitting on '@' alone leaves a
+  // trailing '>' and produces an invalid Message-ID that receivers flag.
+  const domain = String(from ?? '').match(/@([^>\s,;]+)/)?.[1] ?? 'localhost'
 
   const headers = buildHeaders({
     from,
@@ -70,13 +79,40 @@ export function buildEmail({ from, to = [], cc = [], subject, body = '', attachm
     e2ee,
   })
 
+  // PGP/MIME: an armoured message with no attachments is wrapped in
+  // multipart/encrypted, which mail clients recognise and decrypt on their own.
+  // Inline armour requires the recipient's client to guess; this does not.
+  if (attachments.length === 0 && /^-----BEGIN PGP MESSAGE-----/.test(String(body).trim())) {
+    const pgpBoundary = `----=_PGP_${ts}_${rand}`
+    return [
+      ...headers,
+      `Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="${pgpBoundary}"`,
+      '',
+      `--${pgpBoundary}`,
+      'Content-Type: application/pgp-encrypted',
+      'Content-Description: PGP/MIME version identification',
+      '',
+      'Version: 1',
+      '',
+      `--${pgpBoundary}`,
+      'Content-Type: application/octet-stream; name="encrypted.asc"',
+      'Content-Description: OpenPGP encrypted message',
+      'Content-Disposition: inline; filename="encrypted.asc"',
+      'Content-Transfer-Encoding: 7bit',
+      '',
+      String(body).trim(),
+      '',
+      `--${pgpBoundary}--`,
+    ].join('\r\n')
+  }
+
   if (attachments.length === 0) {
     return [
       ...headers,
       'Content-Type: text/html; charset=UTF-8',
       'Content-Transfer-Encoding: 8bit',
       '',
-      body || '',
+      asDocument(body),
     ].join('\r\n')
   }
 

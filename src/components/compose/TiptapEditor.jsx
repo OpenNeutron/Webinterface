@@ -36,7 +36,7 @@ const EditorToolbar = ({ editor }) => {
   if (!editor) return null
 
   return (
-    <div className="flex items-center gap-1 p-2 border-b border-border">
+    <div className="flex flex-wrap items-center gap-1 border-b border-border p-2">
       <TiptapButton
         onClick={() => editor.chain().focus().toggleBold().run()}
         isActive={editor.isActive('bold')}

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Sloth Lee Mail — create your mailbox</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#10150f">
+<style>
+  /* The same language as the app's sign-in screen: forest ground, cream ink,
+     one moss accent, serif for the claim and sans for the machinery. This page
+     is served without the React bundle, so the tokens are written once here. */
+  :root {
+    color-scheme: dark;
+    --bg: #10150f;
+    --ink-1: #e9eee0;
+    --ink-2: #b6c2ab;
+    --ink-3: #98a68e;
+    --ink-4: #6f7d66;
+    --moss: #86bf6a;
+    --primary-ink: #0d1309;
+    --sand: #c8a17a;
+    --rust: #e0593f;
+    --line: #232b1d;
+    --line-strong: #2f3927;
+    --field: #0e130d;
+    --card: #161c15;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink-1);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(1100px 560px at 15% -10%, rgba(134,191,106,0.08), transparent 62%),
+      radial-gradient(900px 520px at 105% 5%, rgba(200,161,122,0.06), transparent 58%);
+    background-attachment: fixed;
+  }
+
+  .layout { display: grid; min-height: 100dvh; }
+  @media (min-width: 900px) {
+    .layout { grid-template-columns: 1.02fr 1fr; }
+  }
+
+  /* ---------- the claim ---------- */
+  .aside {
+    display: none;
+    position: relative;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 40px 48px;
+    border-right: 1px solid var(--line);
+    overflow: hidden;
+  }
+  @media (min-width: 900px) { .aside { display: flex; } }
+  .aside::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(760px 420px at 18% -8%, rgba(134,191,106,0.16), transparent 62%),
+      radial-gradient(620px 380px at 96% 12%, rgba(200,161,122,0.13), transparent 60%);
+  }
+  .aside > * { position: relative; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand svg { width: 28px; height: 28px; }
+  .brand span { font: 500 19px/1.1 ui-serif, "Iowan Old Style", Palatino, Georgia, serif; letter-spacing: -0.01em; }
+  .brand em { font-style: normal; color: var(--sand); }
+  .claim { max-width: 46ch; }
+  .claim h1 {
+    margin: 0;
+    font: 500 32px/1.14 ui-serif, "Iowan Old Style", Palatino, Georgia, serif;
+    letter-spacing: -0.01em;
+  }
+  .claim p { margin: 12px 0 0; max-width: 36ch; color: var(--ink-2); font-size: 13.5px; }
+  .facts { list-style: none; margin: 36px 0 0; padding: 0; }
+  .facts li { display: flex; gap: 12px; margin-bottom: 20px; }
+  .facts b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
+  .facts span { display: block; margin-top: 2px; max-width: 42ch; font-size: 12px; color: var(--ink-3); }
+  /* The same three icons as the sign-in page (lucide key-round, timer, eye-off). */
+  .ico { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--moss); }
+  .aside .domain { font: 11px/1 ui-monospace, Menlo, Consolas, monospace; color: var(--ink-4); }
+
+  /* ---------- the form ---------- */
+  .main { display: flex; flex-direction: column; justify-content: center; padding: 40px 20px; }
+  @media (min-width: 640px) { .main { padding: 40px 32px; } }
+  .card { width: 100%; max-width: 352px; margin: 0 auto; }
+  .brand-sm { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+  .brand-sm svg { width: 24px; height: 24px; }
+  .brand-sm span { font: 500 17px/1.1 ui-serif, "Iowan Old Style", Palatino, Georgia, serif; }
+  @media (min-width: 900px) { .brand-sm { display: none; } }
+
+  h1.form-title {
+    margin: 0;
+    font: 500 24px/1.15 ui-serif, "Iowan Old Style", Palatino, Georgia, serif;
+    letter-spacing: -0.01em;
+  }
+  .sub { margin: 8px 0 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.55; }
+
+  /* Two doors, one at a time: creating a mailbox, or asking for one. */
+  .tabs { display: flex; gap: 4px; margin: 22px 0 0; padding: 3px; border: 1px solid var(--line); border-radius: 10px; }
+  .tabs button {
+    flex: 1; margin: 0; padding: 8px 10px; border: 0; border-radius: 7px;
+    background: transparent; color: var(--ink-3); font-size: 12.5px; font-weight: 500;
+    cursor: pointer; transition: background 120ms, color 120ms;
+  }
+  .tabs button[aria-selected="true"] { background: var(--card); color: var(--ink-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .tabs button:focus-visible { outline: 2px solid var(--moss); outline-offset: 2px; }
+
+  form { margin-top: 20px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  label .opt { color: var(--ink-4); font-weight: 400; }
+  input {
+    width: 100%; min-height: 44px; padding: 11px 13px; border-radius: 10px;
+    border: 1px solid var(--line-strong); background: var(--field); color: var(--ink-1);
+    font-size: 16px; outline: none; transition: border-color 120ms;
+  }
+  input::placeholder { color: var(--ink-3); }
+  input:focus { border-color: var(--moss); }
+  .domain { display: flex; align-items: stretch; }
+  .domain input { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+  .suffix {
+    display: flex; align-items: center; padding: 0 13px; border: 1px solid var(--line-strong); border-left: 0;
+    border-top-right-radius: 10px; border-bottom-right-radius: 10px;
+    background: var(--card); color: var(--ink-3); font-size: 13px; white-space: nowrap;
+  }
+  button.primary {
+    width: 100%; min-height: 44px; margin-top: 6px; padding: 12px 16px; border: 1px solid transparent;
+    border-radius: 10px; background: var(--moss); color: var(--primary-ink);
+    font-size: 14px; font-weight: 600; cursor: pointer; transition: background 120ms;
+  }
+  button.primary:hover:not(:disabled) { background: #93c979; }
+  button.primary:disabled { opacity: 0.55; cursor: default; }
+  button.primary:focus-visible { outline: 2px solid var(--moss); outline-offset: 2px; }
+
+  .msg { min-height: 18px; margin-top: 12px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+  .err { color: var(--rust); }
+  .ok { color: var(--moss); }
+  .fine { margin: 10px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-3); }
+  .fine a, a { color: var(--moss); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+  .fine a:hover, a:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .rule { height: 1px; margin: 24px 0; background: var(--line); border: 0; }
+  [hidden] { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 1ms !important; }
+  }
+  /* On a wider screen the fields match the sign-in page (36px, 13px). A phone keeps 44px and
+     16px: anything smaller makes iOS zoom the page when the field is tapped. */
+  @media (min-width: 640px) {
+    input { min-height: 36px; padding: 7px 12px; border-radius: 6px; font-size: 13px; }
+    .suffix { border-top-right-radius: 6px; border-bottom-right-radius: 6px; font-size: 12.5px; }
+    button.primary { min-height: 36px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+    .tabs { border-radius: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="aside">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-label="Sloth Lee" role="img">
+        <defs><linearGradient id="sl-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c8a17a"/><stop offset="1" stop-color="#a97f57"/></linearGradient></defs>
+        <circle cx="12" cy="12" r="11" fill="url(#sl-brand)"/>
+        <path d="M12 5.2c3.9 0 6.6 2.9 6.6 6.9 0 4.3-2.9 7-6.6 7s-6.6-2.7-6.6-7c0-4 2.7-6.9 6.6-6.9Z" fill="#f4ead6"/>
+        <ellipse cx="8.6" cy="10.9" rx="2.7" ry="2.3" fill="#5c4632" transform="rotate(-14 8.6 10.9)"/>
+        <ellipse cx="15.4" cy="10.9" rx="2.7" ry="2.3" fill="#5c4632" transform="rotate(14 15.4 10.9)"/>
+        <circle cx="9.1" cy="11.1" r="0.95" fill="#10120f"/><circle cx="14.9" cy="11.1" r="0.95" fill="#10120f"/>
+        <ellipse cx="12" cy="14.9" rx="1.6" ry="1.15" fill="#5c4632"/>
+        <path d="M10.2 17c.6.8 3 .8 3.6 0" stroke="#5c4632" stroke-width="1" stroke-linecap="round" fill="none"/>
+      </svg>
+      <span>Sloth <em>Lee</em></span>
+    </div>
+
+    <div class="claim">
+      <h1>Mail that stays yours.</h1>
+      <p>A mailbox where the encryption happens on your device, not on our server.</p>
+      <ul class="facts">
+        <li><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg><div><b>The key never leaves your device</b><span>Your mail is encrypted with a key generated in this browser. The server stores ciphertext it cannot open.</span></div></li>
+        <li><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></svg><div><b>Notes that close behind you</b><span>Send something that deletes itself on first read, on a timer, or with a passphrase.</span></div></li>
+        <li><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg><div><b>No ads, no tracking, no reading</b><span>No analytics scripts, no pixels in your mail, nothing sold to anyone.</span></div></li>
+      </ul>
+    </div>
+
+    <p class="domain">slothlee.xyz</p>
+  </aside>
+
+  <main class="main">
+    <div class="card">
+      <div class="brand-sm">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="11" fill="#c8a17a"/>
+          <path d="M12 5.2c3.9 0 6.6 2.9 6.6 6.9 0 4.3-2.9 7-6.6 7s-6.6-2.7-6.6-7c0-4 2.7-6.9 6.6-6.9Z" fill="#f4ead6"/>
+          <circle cx="9.1" cy="11.1" r="0.95" fill="#10120f"/><circle cx="14.9" cy="11.1" r="0.95" fill="#10120f"/>
+        </svg>
+        <span>Sloth <em style="font-style:normal;color:#c8a17a">Lee</em></span>
+      </div>
+
+      <h1 class="form-title" id="title">Create your mailbox</h1>
+      <p class="sub" id="lede">
+        Your password is hashed on this device before it is sent. Your encryption key is generated
+        the first time you sign in — it never reaches the server.
+      </p>
+
+      <div class="tabs" role="tablist" aria-label="Create or request">
+        <button type="button" role="tab" id="tab-create" aria-selected="true" aria-controls="panel-create">Create a mailbox</button>
+        <button type="button" role="tab" id="tab-request" aria-selected="false" aria-controls="panel-request">Request an invite</button>
+      </div>
+
+      <!-- ---------- create ---------- -->
+      <div id="panel-create" role="tabpanel" aria-labelledby="tab-create">
+        <form id="f" autocomplete="off">
+          <div class="field">
+            <label for="c">Invite code <span class="opt">(optional)</span></label>
+            <input id="c" name="c" placeholder="if you have one" autocapitalize="none" autocorrect="off" spellcheck="false">
+            <p class="fine">No code? Create the account anyway. It is held for approval, and you can sign in the moment it is accepted.</p>
+          </div>
+          <div class="field">
+            <label for="u">Mailbox name</label>
+            <div class="domain">
+              <input id="u" name="u" placeholder="yourname" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+              <span class="suffix" id="suffix">@slothlee.xyz</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="p">Password</label>
+            <input id="p" name="p" type="password" autocomplete="new-password" placeholder="At least 8 characters" required>
+          </div>
+          <div class="field">
+            <label for="p2">Confirm password</label>
+            <input id="p2" name="p2" type="password" autocomplete="new-password" placeholder="Repeat it" required>
+          </div>
+          <button id="go" class="primary" type="submit">Create mailbox</button>
+          <div class="msg" id="m" role="status" aria-live="polite"></div>
+        </form>
+        <p class="fine">Already have a mailbox? <a href="/login">Sign in</a>.</p>
+      </div>
+
+      <!-- ---------- request ---------- -->
+      <div id="panel-request" role="tabpanel" aria-labelledby="tab-request" hidden>
+        <form id="r" autocomplete="off">
+          <div class="field">
+            <label for="re">Your email</label>
+            <input id="re" name="re" type="email" placeholder="you@example.com" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          </div>
+          <div class="field">
+            <label for="rn">Why do you want an account? <span class="opt">(optional)</span></label>
+            <input id="rn" name="rn" placeholder="a line about yourself">
+          </div>
+          <button id="rq" class="primary" type="submit">Request an invite</button>
+          <div class="msg" id="rm" role="status" aria-live="polite"></div>
+        </form>
+        <p class="fine">This server approves new mailboxes by hand. Leave your address and you will get an invite code.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { bcrypt, sha256 } from './vendor/hash-wasm.esm.min.js';
+
+// Must match the login client byte for byte: fixed 16-byte salt "OpenNeutronAuth1",
+// cost 10, same library. The server stores this token as a one-time setup token.
+const AUTH_SALT = new Uint8Array([
+  0x4f, 0x70, 0x65, 0x6e, 0x4e, 0x65, 0x75, 0x74,
+  0x72, 0x6f, 0x6e, 0x41, 0x75, 0x74, 0x68, 0x31,
+]);
+
+const USERNAME_RE = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/;
+
+const f = document.getElementById('f');
+const u = document.getElementById('u');
+const p = document.getElementById('p');
+const p2 = document.getElementById('p2');
+const go = document.getElementById('go');
+const m = document.getElementById('m');
+const c = document.getElementById('c');
+const r = document.getElementById('r');
+const re = document.getElementById('re');
+const rn = document.getElementById('rn');
+const rq = document.getElementById('rq');
+const rm = document.getElementById('rm');
+
+const tabCreate = document.getElementById('tab-create');
+const tabRequest = document.getElementById('tab-request');
+const panelCreate = document.getElementById('panel-create');
+const panelRequest = document.getElementById('panel-request');
+const title = document.getElementById('title');
+const lede = document.getElementById('lede');
+
+const LEDE = {
+  create: 'Your password is hashed on this device before it is sent. Your encryption key is generated the first time you sign in — it never reaches the server.',
+  request: 'This server approves new mailboxes by hand. Leave an address and you will get an invite code when there is room.',
+};
+
+function selectTab(which) {
+  const create = which === 'create';
+  tabCreate.setAttribute('aria-selected', create ? 'true' : 'false');
+  tabRequest.setAttribute('aria-selected', create ? 'false' : 'true');
+  panelCreate.hidden = !create;
+  panelRequest.hidden = create;
+  title.textContent = create ? 'Create your mailbox' : 'Request an invite';
+  lede.textContent = LEDE[create ? 'create' : 'request'];
+  (create ? u : re).focus({ preventScroll: true });
+}
+
+tabCreate.addEventListener('click', () => selectTab('create'));
+tabRequest.addEventListener('click', () => selectTab('request'));
+
+function sayIn(node, text, kind) {
+  node.textContent = text;
+  node.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+r.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = re.value.trim();
+  if (!email.includes('@')) { sayIn(rm, 'Enter a valid email address.', 'err'); return; }
+
+  rq.disabled = true;
+  sayIn(rm, 'Sending your request…');
+  try {
+    const res = await fetch('/api/waitlist/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, note: rn.value.trim() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      sayIn(rm, body.message || 'Request received.', 'ok');
+      r.reset();
+    } else if (res.status === 429) {
+      sayIn(rm, 'Too many requests. Try again later.', 'err');
+    } else {
+      sayIn(rm, body.error || 'Could not send the request.', 'err');
+    }
+  } catch {
+    sayIn(rm, 'Could not send the request. Try again.', 'err');
+  } finally {
+    rq.disabled = false;
+  }
+});
+
+function say(text, kind) {
+  m.textContent = text;
+  m.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+// Find a nonce whose sha256(challenge + nonce) has `bits` leading zero bits.
+// hash-wasm returns a hex string, so the test is on hex nibbles: `bits / 4`
+// zero characters, plus a partial nibble when bits is not a multiple of four.
+async function solveChallenge(challenge, bits) {
+  const wholeNibbles = Math.floor(bits / 4);
+  const remainder = bits % 4;
+  const zeroPrefix = '0'.repeat(wholeNibbles);
+  for (let n = 0; ; n += 1) {
+    const hex = await sha256(challenge + String(n));
+    let ok = hex.startsWith(zeroPrefix);
+    if (ok && remainder > 0) {
+      ok = parseInt(hex[wholeNibbles], 16) < (1 << (4 - remainder));
+    }
+    if (ok) return String(n);
+    // Keep the page responsive on slower phones.
+    if (n % 8000 === 7999) await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
+// Set once the server has queued the account: leaves the button inert instead of
+// inviting a second submit.
+let queued = false;
+
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = u.value.trim().toLowerCase();
+  const password = p.value;
+
+  if (!USERNAME_RE.test(username)) {
+    say('Use 1-64 characters: lowercase letters, digits, dot, underscore or dash, starting and ending with a letter or digit.', 'err');
+    return;
+  }
+  if (password.length < 8) { say('Use at least 8 characters.', 'err'); return; }
+  if (password !== p2.value) { say('Passwords do not match.', 'err'); return; }
+  const invite = c.value.trim();
+
+  go.disabled = true;
+  say('Deriving your password token (this takes a second)…');
+
+  try {
+    const token = await bcrypt({ password, salt: AUTH_SALT, costFactor: 10, outputType: 'encoded' });
+
+    // Proof of work: signup is open to the internet, so each account has to
+    // cost something. The server hands out a random challenge; we search for a
+    // nonce whose sha256(challenge + nonce) starts with N zero bits.
+    say('Checking your browser (a second or two)…');
+    const powChallenge = await (await fetch('/api/signup/challenge')).json();
+    const nonce = await solveChallenge(powChallenge.challenge, powChallenge.difficulty);
+
+    const res = await fetch('/api/user/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        password: token,
+        invite_code: invite,
+        pow_challenge: powChallenge.challenge,
+        pow_nonce: nonce,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+
+    if (res.status === 201) {
+      say('Account created. Sign in with the same password to finish setting up your key.', 'ok');
+      setTimeout(() => { window.location.href = '/login'; }, 1400);
+      return;
+    }
+    // 202: the account exists and is held for approval. It cannot sign in yet,
+    // so do not send them to a login form that will only reject the password.
+    if (res.status === 202) {
+      say('Your account is waiting for approval — you can sign in once it has been accepted. Nothing else is needed from you.', 'ok');
+      // The account exists now: a second submit would only answer "name taken".
+      queued = true;
+      go.textContent = 'Waiting for approval';
+      return;
+    }
+    if (res.status === 409) { say('That mailbox name is already taken.', 'err'); }
+    else if (res.status === 403 && body.code === 'invite_required') { say('That invite code is not valid, or it has already been used. Clear the field to create the account without one.', 'err'); }
+    else if (res.status === 403) { say('Registration is closed on this server.', 'err'); }
+    else if (res.status === 429) { say('Too many attempts. Wait a few minutes and try again.', 'err'); }
+    else { say(body.error || 'Could not create the account. Try again.', 'err'); }
+  } catch (err) {
+    console.error('signup failed', err);
+    say('Something went wrong creating the account. Try again.', 'err');
+  } finally {
+    if (!queued) go.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

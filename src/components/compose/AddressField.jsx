@@ -121,7 +121,7 @@ export function AddressField({ label, chips, onChipsChange }) {
           setTimeout(() => { setSuggestions([]); setActiveSuggestion(-1) }, 150)
         }}
         onPaste={handlePaste}
-        className="flex-1 min-w-[80px] bg-transparent outline-none text-sm text-foreground placeholder:text-foreground/30"
+        className="flex-1 min-w-[80px] bg-transparent outline-none text-sm text-foreground placeholder:text-foreground/30 max-sm:min-h-11"
         placeholder={chips.length === 0 ? 'Email address…' : ''}
       />
       {suggestions.length > 0 && (

@@ -120,6 +120,34 @@ function decodeQuotedPrintable(str) {
     .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
 }
 
+/**
+ * A base64 or quoted-printable body decodes to one byte per character — a binary
+ * string, not text. Everything non-ASCII in it (an em dash, an ellipsis, an
+ * accented name) reads as mojibake until those bytes are decoded to Unicode with
+ * the part's own charset. Attachments keep the raw bytes; only text parts pass
+ * through here.
+ */
+function binaryToText(bin, charset) {
+  if (!bin) return bin
+  // Already text (some senders hand us 8-bit text, and the transcoder above has
+  // run): a character above U+00FF means this is not a byte string.
+  for (let i = 0; i < bin.length; i += 1) {
+    if (bin.charCodeAt(i) > 0xff) return bin
+  }
+  let ascii = true
+  for (let i = 0; i < bin.length; i += 1) {
+    if (bin.charCodeAt(i) > 0x7f) { ascii = false; break }
+  }
+  if (ascii) return bin
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i) & 0xff
+  try {
+    return new TextDecoder((charset || 'utf-8').trim().toLowerCase()).decode(bytes)
+  } catch {
+    return bin
+  }
+}
+
 function decodeTransferEncoding(raw, encoding) {
   const enc = (encoding ?? '').toLowerCase().trim()
   if (enc === 'base64') {
@@ -193,6 +221,9 @@ function extractPartsFromRaw(raw) {
     }
   } else {
     const decoded = decodeTransferEncoding(body.trim(), encoding)
+    const decodedText = ct.type.startsWith('text/')
+      ? binaryToText(decoded, ct.params?.charset)
+      : decoded
     const isAttachment =
       cd.startsWith('attachment') ||
       (!ct.type.startsWith('text/') && !ct.type.startsWith('multipart/'))
@@ -205,9 +236,9 @@ function extractPartsFromRaw(raw) {
         data: decoded,
       })
     } else if (ct.type === 'text/html') {
-      htmlBody = decoded
+      htmlBody = decodedText
     } else {
-      textBody = decoded
+      textBody = decodedText
     }
   }
 
@@ -253,13 +284,20 @@ export function getFaviconUrl(domain) {
   return `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`
 }
 
-export function extractPreview(text, maxLen = 120) {
+export function extractPreview(text, maxLen = 160) {
   if (!text) return ''
   const lines = text
     .split('\n')
     .map(l => l.trim())
     .filter(l => l.length > 0 && !l.startsWith('>') && l !== '--')
-  return lines.join(' ').slice(0, maxLen)
+  const flat = lines.join(' ').replace(/\s+/g, ' ').trim()
+  if (flat.length <= maxLen) return flat
+  // A preview that stops mid-word reads as a bug, not as a preview: cut at the
+  // last word boundary that keeps most of the sentence, and say it was cut.
+  const cut = flat.slice(0, maxLen)
+  const space = cut.lastIndexOf(' ')
+  const body = space > maxLen * 0.6 ? cut.slice(0, space) : cut
+  return `${body.replace(/[\s,;:.\-–—]+$/, '')}…`
 }
 
 const URL_RE = /https?:\/\/[^\s<>"']+/g
@@ -309,6 +347,10 @@ export function parseEmail(raw) {
   const inReplyTo = getHeader(headers, 'in-reply-to') ?? ''
   const references = getHeader(headers, 'references') ?? ''
   const dateStr   = getHeader(headers, 'date') ?? ''
+  // Autocrypt: the sender's client attaches its public key so replies can be
+  // encrypted without any lookup. Kept on the parsed message so the fetch hook
+  // can import it.
+  const autocrypt = getHeader(headers, 'autocrypt') ?? ''
   const date     = dateStr ? new Date(dateStr) : null
   const e2ee     = getHeader(headers, 'openneutron-e2ee')?.toLowerCase() === 'true'
   const ct       = parseContentType(getHeader(headers, 'content-type'))
@@ -317,7 +359,13 @@ export function parseEmail(raw) {
   let htmlBody = null
   let attachments = []
 
-  if (ct.type.startsWith('multipart/')) {
+  // PGP/MIME arrives as multipart/encrypted: a Version part and then the
+  // ciphertext as application/octet-stream. Pull the armour out as the body so
+  // the reader treats it like any other encrypted message.
+  if (ct.type === 'multipart/encrypted') {
+    const armor = bodyRaw.match(/-----BEGIN PGP MESSAGE-----[\s\S]*?-----END PGP MESSAGE-----/)
+    textBody = armor ? armor[0] : null
+  } else if (ct.type.startsWith('multipart/')) {
     const boundary = ct.params.boundary
     if (boundary) {
       for (const part of splitMultipart(bodyRaw, boundary)) {
@@ -332,8 +380,9 @@ export function parseEmail(raw) {
   } else {
     const encoding = getHeader(headers, 'content-transfer-encoding') ?? ''
     const decoded  = decodeTransferEncoding(bodyRaw, encoding)
-    if (ct.type === 'text/html') htmlBody = decoded
-    else textBody = decoded
+    const text = ct.type.startsWith('text/') ? binaryToText(decoded, ct.params?.charset) : decoded
+    if (ct.type === 'text/html') htmlBody = text
+    else textBody = text
   }
 
   const displayText = textBody ?? (htmlBody ? stripHtml(htmlBody) : '')
@@ -341,6 +390,7 @@ export function parseEmail(raw) {
 
   return {
     headers,
+    autocrypt,
     from,
     to,
     cc,

@@ -3,8 +3,10 @@ import { hasSubtleCrypto } from './crypto'
 
 const SESSION_KEY = 'openneutron.private_key'
 const SALT_KEY = 'openneutron.salt'
+const PQ_KEY = 'openneutron.pq_key'
 
 let privateKeyCache = null
+let pqSecretCache = null
 
 // ─── Binary helpers (duplicated locally to avoid circular imports) ────────────
 function toForgeBin(u8) { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return s }
@@ -97,9 +99,21 @@ export const keySession = {
   clear: () => {
     console.log('[keySession] clear() — wiping memory + sessionStorage')
     privateKeyCache = null
+    pqSecretCache = null
     sessionStorage.removeItem(SESSION_KEY)
     sessionStorage.removeItem(SALT_KEY)
+    sessionStorage.removeItem(PQ_KEY)
   },
+
+  // The post-quantum secret key, base64 of the raw ML-KEM-768 bytes. Kept in
+  // sessionStorage beside the RSA key so a reload does not force a re-login,
+  // and wiped with it on sign-out.
+  setPq: (base64Secret) => {
+    if (!base64Secret) return
+    pqSecretCache = base64Secret
+    try { sessionStorage.setItem(PQ_KEY, base64Secret) } catch (err) { console.warn('[keySession] pq key not persisted:', err) }
+  },
+  getPq: () => pqSecretCache || sessionStorage.getItem(PQ_KEY),
 
   setSalt: (salt) => {
     console.log('[keySession] setSalt():', salt)

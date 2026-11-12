@@ -1,26 +1,41 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, Suspense, lazy } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Inbox, PenLine, X } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import EmailList from '@/components/EmailList'
+import ScheduledPanel from '@/components/ScheduledPanel'
 import EmailView from '@/components/EmailView'
-import ComposeWindow from '@/components/ComposeWindow'
 import { ConfirmModal, InputModal } from '@/components/ui/Modal'
+import { SenderRulesModal } from '@/components/SenderRulesModal'
+import { toast } from '@/lib/toast'
 import { TopBar } from '@/components/TopBar'
-import { ChangePasswordModal } from '@/components/ChangePasswordModal'
+import SetupStrip from '@/components/SetupStrip'
+import { fetchPostQuantumStatus } from '@/lib/pqSetup'
+import { hasIdentity } from '@/lib/pgpRing'
+import { UnlockModal } from '@/components/UnlockModal'
 import { EmailToolbar } from '@/components/EmailToolbar'
 import { useEmailFetch } from '@/hooks/useEmailFetch'
 import { useSentEmails } from '@/hooks/useSentEmails'
+import { useTrash } from '@/hooks/useTrash'
+import { listShortcut, neighbourAfterRemoval, stepThrough } from '@/lib/mailNav'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { useGroupActions } from '@/hooks/useGroupActions'
 import { keySession } from '@/keySession'
+import { mergeServerFlags } from '@/lib/mailboxState'
 import { storage } from '@/storage'
 import { buildQuotedBody } from '@/emailParser'
-import api from '@/api'
+import api, { userRecoveryKeyStatus } from '@/api'
+import useSearchShortcut from '@/hooks/useSearchShortcut'
 
+// The editor (Tiptap) and the sending code load when a message is first written.
+const ComposeWindow = lazy(() => import('@/components/ComposeWindow'))
 const PAGE_SIZE = 20
 
 const AuthorizedLayout = () => {
   const [selectedUid, setSelectedUid] = useState(null)
+  const [navOpen, setNavOpen] = useState(false)
   const [selectedFolder, setSelectedFolder] = useState('inbox')
+  useSearchShortcut()
   const [searchQuery, setSearchQuery] = useState('')
   const [filterMode, setFilterMode] = useState('all')
   const [page, setPage] = useState(0)
@@ -31,18 +46,89 @@ const AuthorizedLayout = () => {
   const [composeOpen, setComposeOpen] = useState(false)
   const [replyData, setReplyData] = useState(null)
   const [composeDraftId, setComposeDraftId] = useState(null)
+  // Set when the composer was opened from a held message, so sending it edits that
+  // message instead of queueing a second one.
+  const [composeReplaceId, setComposeReplaceId] = useState(null)
+  // Bumped whenever a held message changes, so the panel does not wait a minute
+  // to show the edit the sender just made.
+  const [scheduledVersion, setScheduledVersion] = useState(0)
   const [drafts, setDrafts] = useState(() => storage.getDrafts())
+  const navigate = useNavigate()
   const [userEmail, setUserEmail] = useState('')
   const [isAdmin, setIsAdmin] = useState(() => storage.getIsAdmin())
-  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [setupDismissed, setSetupDismissed] = useState(false)
+  // null = unknown (not fetched yet), false = no recovery key on file.
+  const [recoveryKeySet, setRecoveryKeySet] = useState(null)
+  const [recoveryPromptDismissed, setRecoveryPromptDismissed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    userRecoveryKeyStatus()
+      .then((data) => { if (!cancelled) setRecoveryKeySet(!!data.set) })
+      .catch(() => { if (!cancelled) setRecoveryKeySet(null) })
+    return () => { cancelled = true }
+  }, [])
+  const [hasOwnKey, setHasOwnKey] = useState(true)
+  // null = not known yet. An unanswered request must not be drawn as a gap.
+  const [pqEnabled, setPqEnabled] = useState(null)
+
+  // Every incomplete security step, gathered so one strip can carry them all.
+  const setupGaps = []
+  if (recoveryKeySet === false) {
+    setupGaps.push({
+      id: 'recovery',
+      label: 'Recovery key',
+      href: '/settings#recovery',
+      note: 'Without one, a forgotten password means your encrypted mail cannot be read again — the reset link cannot open it either.',
+    })
+  }
+  if (!hasOwnKey) {
+    setupGaps.push({
+      id: 'openpgp',
+      label: 'OpenPGP key',
+      note: 'Mail between mailboxes here is already encrypted with your account key. An OpenPGP key is what lets you exchange encrypted mail with people on other providers.',
+      href: '/settings#keys',
+    })
+  }
+  if (pqEnabled === false) {
+    setupGaps.push({
+      id: 'post-quantum',
+      label: 'Post-quantum protection',
+      note: 'Mail is sealed with RSA alone, and RSA is the part a quantum computer breaks. Turning it on adds a quantum-resistant half to every new message.',
+      href: '/settings#post-quantum',
+    })
+  }
+  const dismissSetup = () => setSetupDismissed(true)
+  const [needsUnlock, setNeedsUnlock] = useState(false)
   const [serverStatus, setServerStatus] = useState('checking')
 
-  const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore } = useEmailFetch()
+  const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore, fetchPreviewsFor, reload, checkNew } = useEmailFetch()
   const { sentUids, setSentUids, fetchSentUids, fetchSentPreviews } = useSentEmails(setPreviews)
-  const { markRead, markUnread, toggleStar, deleteEmail, moveToGroup, removeFromGroup } = useEmailActions({
-    emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups,
+  // After a restore (Undo, or from Trash) the folders are read again: the server knows where
+  // each message goes back to, in its order.
+  const reloadFolders = useCallback(async () => {
+    await fetchEmails(0)
+    const sent = await fetchSentUids()
+    if (sent.length) await fetchSentPreviews(sent)
+  }, [fetchEmails, fetchSentUids, fetchSentPreviews])
+  const trash = useTrash({ fetchPreviewsFor, fetchSentPreviews, setPreviews, onRestored: reloadFolders })
+  const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, undoLast, moveToGroup, removeFromGroup, forget } = useEmailActions({
+    emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups, setSentUids,
+    onTrashed: trash.addTrashed,
+    onRestored: async (back) => {
+      if (back.length) trash.fetchTrash()
+      await reloadFolders()
+    },
   })
-  const { createGroup, renameGroup, deleteGroup } = useGroupActions({ setGroups, setSelectedFolder, setModalState })
+  const { createGroup, renameGroup, deleteGroup, setSenderRules } = useGroupActions({ setGroups, setSelectedFolder, setModalState })
+
+  useEffect(() => {
+    let alive = true
+    fetchPostQuantumStatus()
+      .then((s) => { if (alive && !s?.unavailable) setPqEnabled(!!s?.enabled) })
+      .catch(() => { /* unknown stays unknown; no gap is invented */ })
+    return () => { alive = false }
+  }, [])
 
   const checkServer = useCallback(async () => {
     try {
@@ -69,17 +155,74 @@ const AuthorizedLayout = () => {
     } catch {}
   }, [])
 
-  const handleRefresh = useCallback(() => {
-    fetchEmails(0)
-  }, [fetchEmails])
+  // Refresh reads the folder on screen. It used to read the inbox whatever was showing, so
+  // Refresh in Sent or Trash spun and changed nothing there.
+  const [refreshing, setRefreshing] = useState(false)
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      if (selectedFolder === 'sent') {
+        const sent = await fetchSentUids()
+        if (sent.length) await fetchSentPreviews(sent)
+      } else if (selectedFolder === 'trash') {
+        await trash.fetchTrash()
+      } else {
+        await reload()
+        if (selectedFolder !== 'inbox' && selectedFolder !== 'starred' && selectedFolder !== 'drafts') await fetchGroups()
+      }
+    } finally {
+      setRefreshing(false)
+    }
+  }, [selectedFolder, fetchSentUids, fetchSentPreviews, trash, reload, fetchGroups])
+
+  // New mail arrives without a tap: once a minute while the app is on screen, and at once when
+  // it comes back (a phone switching back to the tab, a laptop waking). Hidden tabs do not poll.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) checkNew()
+    }
+    const timer = setInterval(check, 60_000)
+    document.addEventListener('visibilitychange', check)
+    window.addEventListener('online', check)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', check)
+      window.removeEventListener('online', check)
+    }
+  }, [checkNew])
 
   useEffect(() => {
     checkServer()
     fetchEmails(0)
     fetchGroups()
+    // The private key lives only in the session; a reload drops it, and without
+    // it every message renders as undecryptable. Ask once, up front.
+    keySession.get().then((k) => { if (!k) setNeedsUnlock(true) })
+
+    // Adopt the server's read/starred state so this browser agrees with every
+    // other one. Until this lands, meta is treated as a cache, not the truth.
+    api.post('/email/flags', {}, { headers: { Authorization: `Bearer ${storage.getToken()}` } })
+      .then((res) => {
+        const flags = res.data?.flags ?? []
+        if (!flags.length) return
+        setEmailMeta((prev) => {
+          const merged = mergeServerFlags(prev, flags)
+          storage.saveEmailMeta(merged)
+          return merged
+        })
+      })
+      .catch(() => {})
     const serverPollId = setInterval(() => checkServer(), 30000)
     return () => {
       clearInterval(serverPollId)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      setHasOwnKey(hasIdentity())
+    } catch {
+      setHasOwnKey(true)
     }
   }, [])
 
@@ -88,10 +231,62 @@ const AuthorizedLayout = () => {
     if (selectedFolder === 'starred') return uids.filter((uid) => emailMeta[uid]?.starred)
     if (selectedFolder === 'sent') return sentUids
     if (selectedFolder === 'drafts') return drafts.map((d) => d.id)
+    if (selectedFolder === 'trash') return trash.items.map((item) => item.uid)
     const group = groups.find((g) => g.uid === selectedFolder)
     if (group) return group.email_uids.filter((uid) => uids.includes(uid) || sentUids.includes(uid))
     return uids
   })()
+
+  // ── Senders ────────────────────────────────────────────────────────────────
+  const senderOf = (uid) => (previews[uid]?.from?.email || '').toLowerCase()
+  /** The messages in the folder on screen from one sender (what is loaded here). */
+  const uidsFromSender = (address) => visibleUids.filter((uid) => senderOf(uid) === address)
+
+  /**
+   * A rule only files mail that arrives after it; the messages from those senders already here
+   * are filed now, so the group is right the moment the rule is saved.
+   */
+  const fileExisting = async (group, addresses) => {
+    const wanted = new Set(addresses)
+    const have = new Set((group.email_uids ?? []).map(String))
+    const list = uids.filter((uid) => wanted.has(senderOf(uid)) && !have.has(String(uid)))
+    const filed = []
+    for (const uid of list) {
+      try {
+        await api.post('/group/add-email', `{"group_uid":"${group.uid}","email_uid":"${uid}"}`, {
+          headers: { Authorization: `Bearer ${storage.getToken()}` },
+        })
+        filed.push(String(uid))
+      } catch {
+        // silent: counted below; the rule itself is saved and will file what arrives next.
+      }
+    }
+    if (filed.length) {
+      setGroups((prev) => prev.map((g) => (g.uid === group.uid ? { ...g, email_uids: [...new Set([...(g.email_uids ?? []).map(String), ...filed])] } : g)))
+    }
+    return { filed: filed.length, missed: list.length - filed.length }
+  }
+
+  const fileSender = async (address, groupUid) => {
+    const group = groups.find((g) => g.uid === groupUid)
+    if (!group) return
+    const updated = await setSenderRules(groupUid, [...(group.filter_addresses ?? []), address])
+    if (!updated) return
+    const { filed, missed } = await fileExisting({ ...group, ...updated }, [address])
+    toast(`Mail from ${address} now goes to ${group.title} as it arrives.${filed ? ` ${filed} already here filed too.` : ''}${missed ? ` ${missed} could not be filed.` : ''}`)
+  }
+
+  const saveSenderRules = async (addresses) => {
+    const group = groups.find((g) => g.uid === modalState.groupUid)
+    setModalState({ type: null })
+    if (!group) return
+    const before = new Set(group.filter_addresses ?? [])
+    const updated = await setSenderRules(group.uid, addresses)
+    if (!updated) return
+    const added = (updated.filter_addresses ?? []).filter((address) => !before.has(address))
+    const { filed } = added.length ? await fileExisting({ ...group, ...updated }, added) : { filed: 0 }
+    toast(`${group.title}: ${updated.filter_addresses?.length ? `${updated.filter_addresses.length} sender rule${updated.filter_addresses.length === 1 ? '' : 's'} saved` : 'sender rules removed'}.${filed ? ` ${filed} message${filed === 1 ? '' : 's'} already here filed.` : ''}`)
+  }
 
   const draftPreviews = useMemo(() => {
     const map = {}
@@ -130,6 +325,25 @@ const AuthorizedLayout = () => {
   }, [visibleUids, filterMode, searchQuery, emailMeta, previews, selectedFolder])
 
   const totalFiltered = filteredUids.length
+  // The bar's badge counts what the inbox holds, not whatever list happens to be open.
+  const inboxUnread = useMemo(
+    () => (selectedFolder === 'inbox' ? uids.filter((uid) => emailMeta[uid]?.unread !== false).length : 0),
+    [uids, emailMeta, selectedFolder],
+  )
+  // The unread count where a phone and a tab strip show it: in the title, and on the app icon
+  // when Sloth Mail is installed. Counted over the inbox whatever folder is open.
+  const unreadForBadge = useMemo(() => uids.filter((uid) => emailMeta[uid]?.unread !== false).length, [uids, emailMeta])
+  useEffect(() => {
+    document.title = unreadForBadge ? `(${unreadForBadge}) Sloth Lee Mail` : 'Sloth Lee Mail'
+    try {
+      if (unreadForBadge) navigator.setAppBadge?.(unreadForBadge)?.catch?.(() => {})
+      else navigator.clearAppBadge?.()?.catch?.(() => {})
+    } catch {
+      // silent: the badge is a courtesy; a browser without it simply shows none.
+    }
+  }, [unreadForBadge])
+  useEffect(() => () => { document.title = 'Sloth Lee Mail' }, [])
+
   const pageCount = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE))
   const safePage = Math.min(page, pageCount - 1)
   const pageStart = totalFiltered === 0 ? 0 : safePage * PAGE_SIZE + 1
@@ -137,6 +351,11 @@ const AuthorizedLayout = () => {
   const pagedUids = filteredUids.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
 
   useEffect(() => { setPage(0) }, [selectedFolder, filterMode, searchQuery])
+
+  const { fetchTrash } = trash
+  useEffect(() => {
+    if (selectedFolder === 'trash') fetchTrash()
+  }, [selectedFolder, fetchTrash])
 
   useEffect(() => {
     if (selectedFolder === 'sent') {
@@ -152,6 +371,7 @@ const AuthorizedLayout = () => {
     if (selectedFolder === 'starred') return 'Starred'
     if (selectedFolder === 'sent') return 'Sent'
     if (selectedFolder === 'drafts') return 'Drafts'
+    if (selectedFolder === 'trash') return 'Trash'
     return groups.find((g) => g.uid === selectedFolder)?.title ?? 'Inbox'
   })()
 
@@ -185,32 +405,148 @@ const AuthorizedLayout = () => {
     })
   }
 
-  const handleToggleSelectAll = () => {
-    const allChecked = pagedUids.every(uid => checkedUids.has(uid))
-    setCheckedUids(allChecked ? new Set() : new Set(pagedUids))
+  // A conversation is selected as one: if every message in it is checked, the press clears them;
+  // otherwise it checks them all.
+  const handleCheckThread = (list) => {
+    setCheckedUids((prev) => {
+      const next = new Set(prev)
+      const all = list.every((uid) => next.has(uid))
+      for (const uid of list) {
+        if (all) next.delete(uid)
+        else next.add(uid)
+      }
+      return next
+    })
   }
 
+  const handleToggleSelectAll = () => {
+    // Page-scoped, and it does not throw away a selection made on another page: the control says
+    // "select all N on this page", so it must mean exactly that.
+    setCheckedUids(prev => {
+      const next = new Set(prev)
+      const allOnPage = pagedUids.length > 0 && pagedUids.every(uid => next.has(uid))
+      for (const uid of pagedUids) {
+        if (allOnPage) next.delete(uid)
+        else next.add(uid)
+      }
+      return next
+    })
+  }
+
+  // After the open message is deleted, the next one opens — on a screen wide enough to show
+  // the list and the message side by side. On a phone the reader is the whole screen, and
+  // going back to the list is what people expect there.
+  // The rows in the order they are shown (EmailList reports it); the server's order is not it.
+  const [displayOrder, setDisplayOrder] = useState([])
+  // Same rows, same array: the list re-reports on every render, and a new array each time
+  // would render the page again, forever.
+  const handleOrder = useCallback((order) => {
+    setDisplayOrder((prev) => (prev.length === order.length && prev.every((uid, i) => uid === order[i]) ? prev : order))
+  }, [])
+  const listOrder = useMemo(() => {
+    const visible = new Set(pagedUids.map(String))
+    const shown = displayOrder.filter((uid) => visible.has(String(uid)))
+    return shown.length ? shown : pagedUids
+  }, [displayOrder, pagedUids])
+
+  const openNeighbour = (removed) => {
+    if (!selectedUid || !removed.map(String).includes(String(selectedUid))) return
+    const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+    const next = wide ? neighbourAfterRemoval(listOrder, removed) : null
+    setSelectedUid(next)
+  }
+
+  /** Several at once: to Trash (with one Undo), or in Trash, delete for good after asking. */
+  const deleteUids = async (list) => {
+    if (!list.length) return
+    if (selectedFolder === 'trash') {
+      setModalState({ type: 'delete-forever', uids: list })
+      return
+    }
+    const { gone, failed, missingRoute } = await deleteMany(list)
+    // A server without Trash moved nothing. Say so and offer the delete it can do, rather than a
+    // delete button that does nothing.
+    if (missingRoute && !gone.length) {
+      setModalState({ type: 'delete-forever', uids: list, noTrash: true })
+      return list
+    }
+    openNeighbour(gone)
+    return failed
+  }
+
+  /** Everything here from one sender, to Trash with one Undo — the cure for a noisy alert. */
+  const deleteFromSender = async (address) => {
+    const list = uidsFromSender(address)
+    if (!list.length) return
+    const failed = await deleteUids(list)
+    if (failed?.length) setCheckedUids(new Set(failed))
+  }
+
+  // Delete moves to Trash with an Undo, so it no longer asks first. Only in Trash is a delete
+  // permanent, and only there does it ask.
   const deleteSelected = async () => {
     const toDelete = [...checkedUids]
     setModalState({ type: null })
-    const token = storage.getToken()
-    const headers = { Authorization: `Bearer ${token}` }
-    await Promise.all(toDelete.map(async (uid) => {
-      try {
-        await api.post('/email/delete', `{"uid":${uid}}`, { headers })
-        for (const g of groups) {
-          if (g.email_uids.includes(uid)) {
-            try { await api.post('/group/remove-email', `{"group_uid":${g.uid},"email_uid":${uid}}`, { headers }) } catch {}
-          }
-        }
-      } catch {}
-    }))
-    setUids(prev => prev.filter(u => !toDelete.includes(u)))
-    setPreviews(prev => { const n = { ...prev }; toDelete.forEach(u => delete n[u]); return n })
-    setSelectedUid(prev => (toDelete.includes(prev) ? null : prev))
-    setGroups(prev => prev.map(g => ({ ...g, email_uids: g.email_uids.filter(u => !toDelete.includes(u)) })))
-    setCheckedUids(new Set())
+    // A delete the server refuses must not vanish from the screen; what did not move stays checked.
+    const failed = await deleteUids(toDelete)
+    if (failed) setCheckedUids(new Set(failed))
   }
+
+  const restoreSelected = async () => {
+    const { failed } = await trash.restore([...checkedUids])
+    setCheckedUids(new Set(failed))
+  }
+
+  const deleteOne = async (uid) => {
+    if (String(uid).startsWith('draft_')) return handleDeleteDraft(uid)
+    if (selectedFolder === 'trash') return setModalState({ type: 'delete-forever', uids: [uid] })
+    const next = neighbourAfterRemoval(listOrder, [uid])
+    const wasOpen = String(selectedUid) === String(uid)
+    const outcome = await deleteEmail(uid)
+    if (outcome === 'no-trash') {
+      setModalState({ type: 'delete-forever', uids: [uid], noTrash: true })
+      return
+    }
+    if (outcome && wasOpen) {
+      const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+      setSelectedUid(wide ? next : null)
+    }
+  }
+
+  // The list's keyboard: Delete or # deletes what is checked, or else the open message;
+  // Z takes back the last delete; J and K move through the list. Nothing fires while a box
+  // is open, while composing, or while typing.
+  useEffect(() => {
+    const onKey = (event) => {
+      if (composeOpen || modalState.type || needsUnlock) return
+      const action = listShortcut(event, document.activeElement)
+      if (!action) return
+      if (action === 'undo') {
+        if (selectedFolder === 'trash') return
+        event.preventDefault()
+        undoLast()
+        return
+      }
+      if (action === 'next' || action === 'prev') {
+        const next = stepThrough(listOrder, selectedUid, action === 'next' ? 1 : -1)
+        if (next == null) return
+        event.preventDefault()
+        handleSelect(next)
+        return
+      }
+      if (action === 'delete' && selectedFolder !== 'drafts') {
+        if (checkedUids.size) {
+          event.preventDefault()
+          deleteSelected()
+        } else if (selectedUid) {
+          event.preventDefault()
+          deleteOne(selectedUid)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   const markSelectedRead = () => {
     checkedUids.forEach(uid => markRead(uid))
@@ -244,6 +580,44 @@ const AuthorizedLayout = () => {
     setComposeOpen(false)
     setReplyData(null)
     setComposeDraftId(null)
+    setComposeReplaceId(null)
+  }, [])
+
+  const handleScheduled = useCallback(({ id, sendAt, draft }) => {
+    if (!id || !draft) return
+    storage.saveScheduledDraft(id, sendAt, draft)
+    setDrafts(storage.getDrafts())
+    setScheduledVersion((n) => n + 1)
+  }, [])
+
+  const handleEditScheduled = useCallback((item) => {
+    const draft = storage.getScheduledDraft(item.id)
+    if (!draft) {
+      // Only reachable from another device: the copy that could be edited lives
+      // on the one that composed it.
+      return
+    }
+    setReplyData({
+      to: draft.to ?? [], cc: draft.cc ?? [], bcc: draft.bcc ?? [],
+      subject: draft.subject ?? '', body: draft.body ?? '',
+      // Opens on the time it is already held for, so the button says "Update"
+      // instead of offering to send a second copy now.
+      sendAt: item.send_at ?? draft.sendAt ?? null,
+    })
+    setComposeDraftId(draft.id)
+    setComposeReplaceId(item.id)
+    setComposeOpen(true)
+  }, [])
+
+  const handleCancelledScheduled = useCallback((id) => {
+    storage.deleteDraft(`sched_${id}`)
+    setDrafts(storage.getDrafts())
+  }, [])
+
+  const handleScheduledItems = useCallback((items) => {
+    const live = new Set(items.filter((i) => i.status === 'pending').map((i) => i.id))
+    const next = storage.pruneScheduledDrafts(live)
+    setDrafts(next)
   }, [])
 
   const handleDeleteDraft = useCallback((draftId) => {
@@ -257,6 +631,51 @@ const AuthorizedLayout = () => {
     setComposeOpen(true)
   }, [])
 
+  // Everyone the message already went to who is not me: the sender, the other To's,
+  // and the Cc list. Reply-all without them is a reply that quietly drops people.
+  const handleReplyAll = useCallback((email) => {
+    const addr = (a) => (a?.email ?? '').toLowerCase()
+    const me = String(userEmail ?? '').toLowerCase()
+    // The account identity in this app can be a bare username while the header carries
+    // name@domain, so compare local parts too — otherwise you reply-all to yourself.
+    const meLocal = me.split('@')[0]
+    const isMe = (e) => e === me || (meLocal && e.split('@')[0] === meLocal)
+    const seen = new Set()
+    if (me) seen.add(me)
+    const out = []
+    for (const a of [...(email.replyTo ?? []), email.from, ...(email.to ?? []), ...(email.cc ?? [])]) {
+      const e = addr(a)
+      if (!e || isMe(e) || seen.has(e)) continue
+      seen.add(e)
+      out.push(a.email)
+    }
+    const subj = /^Re:/i.test(email.subject ?? '') ? email.subject : `Re: ${email.subject ?? ''}`
+    setReplyData({
+      to: out,
+      subject: subj,
+      body: `\n\n${buildQuotedBody(email)}`,
+      inReplyTo: email.messageId ?? '',
+      references: email.messageId ?? '',
+      fromAlias: email.alias ?? '',
+    })
+    setComposeOpen(true)
+  }, [userEmail])
+
+  // Forward is the same quoted body with no threading: it is a new conversation, and
+  // pretending otherwise would file the reply under the original.
+  const handleForward = useCallback((email) => {
+    const subj = /^Fwd:/i.test(email.subject ?? '') ? email.subject : `Fwd: ${email.subject ?? ''}`
+    setReplyData({
+      to: [],
+      subject: subj,
+      body: `\n\n${buildQuotedBody(email)}`,
+      inReplyTo: '',
+      references: '',
+      fromAlias: email.alias ?? '',
+    })
+    setComposeOpen(true)
+  }, [])
+
   const handleReply = useCallback((email) => {
     const sender = email.replyTo?.[0] ?? email.from
     const replyAddr = sender?.email ?? ''
@@ -267,6 +686,8 @@ const AuthorizedLayout = () => {
       body:      `\n\n${buildQuotedBody(email)}`,
       inReplyTo: email.messageId ?? '',
       references: email.messageId ?? '',
+      // Answer from the address they wrote to, not from the real one.
+      fromAlias: email.alias ?? '',
     })
     setComposeOpen(true)
   }, [])
@@ -274,7 +695,7 @@ const AuthorizedLayout = () => {
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-64 shrink-0">
+        <div className="hidden md:block w-64 shrink-0">
           <Sidebar
             selectedFolder={selectedFolder}
             onSelectFolder={setSelectedFolder}
@@ -282,13 +703,58 @@ const AuthorizedLayout = () => {
             onRequestCreateGroup={() => setModalState({ type: 'create-group' })}
             onRequestRenameGroup={(id, name) => setModalState({ type: 'rename-group', id, name })}
             onRequestDeleteGroup={(id, name) => setModalState({ type: 'delete-group', id, name })}
+            onRequestSenderRules={(groupUid) => setModalState({ type: 'sender-rules', groupUid })}
             emailMeta={emailMeta}
             uids={uids}
             sentCount={sentUids.length}
             draftsCount={drafts.length}
+            trashCount={trash.items.length}
             onCompose={() => setComposeOpen(true)}
+            onOpenSettings={() => navigate('/settings')}
           />
         </div>
+        {/* Mobile folder drawer */}
+        {navOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <div
+              className="absolute inset-0 bg-black/60"
+              onClick={() => setNavOpen(false)}
+            />
+            {/* Clear of the notch and the home indicator when the app runs full-screen. */}
+            <div
+              className="absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-y-auto overscroll-contain border-r border-border bg-background shadow-2xl"
+              style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+            >
+              {/* A drawer whose only exit is a tap on a dimmed strip or the system
+                  back gesture strands anyone who does not know that gesture exists. */}
+              <button
+                type="button"
+                onClick={() => setNavOpen(false)}
+                aria-label="Close folders"
+                style={{ top: 'calc(0.375rem + env(safe-area-inset-top))' }}
+                className="absolute right-1.5 z-10 flex size-11 items-center justify-center rounded-md text-ink-3 transition-colors duration-120 hover:bg-accent hover:text-ink-1"
+              >
+                <X className="size-5" />
+              </button>
+              <Sidebar
+                selectedFolder={selectedFolder}
+                onSelectFolder={(folder) => { setSelectedFolder(folder); setNavOpen(false) }}
+                groups={groups}
+                onRequestCreateGroup={() => { setNavOpen(false); setModalState({ type: 'create-group' }) }}
+                onRequestRenameGroup={(id, name) => { setNavOpen(false); setModalState({ type: 'rename-group', id, name }) }}
+                onRequestDeleteGroup={(id, name) => { setNavOpen(false); setModalState({ type: 'delete-group', id, name }) }}
+                onRequestSenderRules={(groupUid) => { setNavOpen(false); setModalState({ type: 'sender-rules', groupUid }) }}
+                emailMeta={emailMeta}
+                uids={uids}
+                sentCount={sentUids.length}
+                draftsCount={drafts.length}
+                trashCount={trash.items.length}
+                onCompose={() => { setNavOpen(false); setComposeOpen(true) }}
+                onOpenSettings={() => { setNavOpen(false); navigate('/settings') }}
+              />
+            </div>
+          </div>
+        )}
         <div className="flex-1 flex flex-col min-w-0">
           <TopBar
             searchQuery={searchQuery}
@@ -298,10 +764,27 @@ const AuthorizedLayout = () => {
             serverStatus={serverStatus}
             onLogout={handleLogout}
             onRetryServer={checkServer}
-            onChangePassword={() => setShowChangePassword(true)}
+            
+            onOpenNav={() => setNavOpen(true)}
+            
           />
-          <div className="flex-1 flex min-h-0">
-            <div className="w-[680px] shrink-0 border-l border-r border-border flex flex-col overflow-hidden">
+          <SetupStrip
+            items={setupDismissed ? [] : setupGaps}
+            onOpen={(href) => navigate(href || '/settings')}
+            onDismiss={dismissSetup}
+          />
+          <div
+            /* The phone bar is fixed to the bottom edge; reserve its height here so the
+               list ends above it instead of being clipped mid-row behind it. */
+            className="flex-1 flex min-h-0 max-sm:pb-[72px]"
+          >
+            {/* With nothing open the list takes the whole width. An empty reading
+                pane on a resting screen is half the app showing nothing. */}
+            <div
+              className={`flex w-full flex-col overflow-hidden ${
+                selectedUid ? 'md:w-[400px] md:shrink-0 md:border-r md:border-line' : ''
+              }`}
+            >
               {selectedFolder !== 'drafts' && (
               <EmailToolbar
                 pagedUids={pagedUids}
@@ -313,8 +796,12 @@ const AuthorizedLayout = () => {
                 pageCount={pageCount}
                 hasMore={selectedFolder === 'inbox' && hasMore}
                 groups={groups}
+                filterMode={filterMode}
+                onFilterModeChange={(m) => { setFilterMode(m); setPage(0) }}
                 onToggleSelectAll={handleToggleSelectAll}
-                onDeleteSelected={() => setModalState({ type: 'delete-selected' })}
+                allChecked={pagedUids.length > 0 && pagedUids.every(uid => checkedUids.has(uid))}
+                onDeleteSelected={deleteSelected}
+                onRestoreSelected={selectedFolder === 'trash' ? restoreSelected : null}
                 onMarkSelectedRead={markSelectedRead}
                 onMarkSelectedUnread={markSelectedUnread}
                 onMoveSelectedToGroup={moveSelectedToGroup}
@@ -325,10 +812,41 @@ const AuthorizedLayout = () => {
                   if (next >= pageCount - 1 && hasMore) loadMore()
                 }}
                 onRefresh={handleRefresh}
-                refreshing={loading}
+                refreshing={loading || refreshing}
               />
               )}
+              {selectedFolder === 'trash' && (
+                <div className="border-b border-line">
+                  <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-4 py-2 text-[12px] text-ink-2">
+                    <span className="min-w-0 flex-1">
+                      {trash.available
+                        ? `Deleted mail waits here for ${trash.retentionDays} days, then it is deleted for good. Restore puts it back where it was.`
+                        : 'Trash needs the latest mail server. Until it is updated, nothing can be moved here.'}
+                    </span>
+                    {trash.available && trash.items.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setModalState({ type: 'empty-trash' })}
+                        className="shrink-0 rounded-md px-2 py-1 font-medium text-destructive transition-colors duration-120 hover:bg-destructive/10 max-sm:min-h-11"
+                      >
+                        Empty trash
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {selectedFolder === 'sent' && (
+                <ScheduledPanel
+                  editableIds={new Set(drafts.filter((d) => d.scheduledId).map((d) => d.scheduledId))}
+                  onEdit={handleEditScheduled}
+                  onCancelled={handleCancelledScheduled}
+                  onItems={handleScheduledItems}
+                  version={scheduledVersion}
+                />
+              )}
               <EmailList
+                searchQuery={searchQuery}
+                filterMode={filterMode}
                 uids={pagedUids}
                 previews={allPreviews}
                 emailMeta={emailMeta}
@@ -336,47 +854,111 @@ const AuthorizedLayout = () => {
                 checkedUids={checkedUids}
                 onSelect={handleSelect}
                 onCheck={handleCheck}
-                onToggleSelectAll={handleToggleSelectAll}
+                onCheckThread={handleCheckThread}
                 loading={loading}
                 hasMore={selectedFolder === 'inbox' && hasMore}
                 onLoadMore={loadMore}
                 onMarkRead={markRead}
                 onMarkUnread={markUnread}
                 onToggleStar={toggleStar}
-                onDeleteEmail={(uid) => {
-                  if (String(uid).startsWith('draft_')) { handleDeleteDraft(uid) }
-                  else setModalState({ type: 'delete-email', uid })
-                }}
+                onDeleteEmail={deleteOne}
+                onDeleteThread={deleteUids}
+                onOrder={handleOrder}
                 onMoveToGroup={moveToGroup}
                 onRemoveFromGroup={handleRemoveFromGroup}
                 groups={groups}
                 folderLabel={folderLabel}
                 selectedFolder={selectedFolder}
-                filterMode={filterMode}
-                onFilterModeChange={(m) => { setFilterMode(m); setPage(0) }}
+                onRefresh={handleRefresh}
               />
             </div>
-            <div className="flex-1 min-w-0">
+            {selectedUid && (
+            <div className="fixed inset-0 z-40 flex min-w-0 flex-1 flex-col bg-background md:static md:z-auto md:block">
+              {/* On a phone the back control lives in the reader's own action bar: two
+                  stacked bars cost 100px of a 700px screen, and the message is the point. */}
+              <button
+                onClick={() => setSelectedUid(null)}
+                  className="hidden min-h-11 items-center gap-1.5 px-3 py-2 border-b border-border text-sm text-foreground/70"
+                >
+                <span aria-hidden="true">←</span> Back to inbox
+              </button>
               <EmailView
                 key={selectedUid}
                 uid={selectedUid}
+                onBack={() => setSelectedUid(null)}
                 myEmail={userEmail}
                 emailMeta={selectedUid ? (emailMeta[selectedUid] ?? {}) : null}
+                arrivedAt={selectedUid ? (previews[selectedUid]?.alias ?? null) : null}
                 onToggleStar={toggleStar}
                 onMarkRead={markRead}
                 onMarkUnread={markUnread}
-                onDeleteEmail={(uid) => setModalState({ type: 'delete-email', uid })}
+                onDeleteEmail={deleteOne}
+                onRestore={selectedFolder === 'trash' ? (uid) => trash.restore([uid]).then(() => setSelectedUid(null)) : null}
+                onMessageDeleted={(uid) => {
+                  // The server already deleted it, so drop the row without asking
+                  // the delete endpoint again. The open message stays on screen:
+                  // it is the last time it can be read.
+                  setUids((prev) => prev.filter((u) => u !== uid))
+                  setPreviews((prev) => {
+                    const next = { ...prev }
+                    delete next[uid]
+                    return next
+                  })
+                }}
                 onMoveToGroup={moveToGroup}
                 onRemoveFromGroup={handleRemoveFromGroup}
                 groups={groups}
                 selectedFolder={selectedFolder}
                 onReply={handleReply}
+                onReplyAll={handleReplyAll}
+                onForward={handleForward}
                 onComposeTo={handleComposeTo}
+                onFileSender={selectedFolder === 'trash' || selectedFolder === 'sent' ? null : fileSender}
+                onDeleteFromSender={selectedFolder === 'trash' ? null : deleteFromSender}
+                countFromSender={(address) => uidsFromSender(address).length}
               />
             </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* A phone gets a bar, not a floating button: the action that defines the app on
+          the right, and the drawer's only other job — switching folder — on the left,
+          where a thumb can reach it. Hidden while composing or reading, because both
+          take the bottom of the screen for themselves. */}
+      {!composeOpen && !selectedUid && (
+        <nav
+          aria-label="Mail actions"
+          data-testid="phone-bar"
+          className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-line bg-card/95 px-4 backdrop-blur sm:hidden"
+          style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))', paddingTop: '0.5rem' }}
+        >
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            aria-label={inboxUnread ? `Folders and mailboxes, ${inboxUnread} unread in the inbox` : 'Folders and mailboxes'}
+            className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-[13px] text-ink-2 transition-colors duration-120 active:bg-accent"
+          >
+            <Inbox className="size-4.5" />
+            <span>Folders</span>
+            {/* No badge here. A bare number beside "Folders" reads as a folder count, and
+                the toolbar above already says "6 messages" — two numbers meaning different
+                things, next to each other, is worse than one. */}
+            {inboxUnread > 0 && <span className="sr-only">{inboxUnread} unread</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setComposeOpen(true)}
+            aria-label="New message"
+            data-testid="compose-fab"
+            className="flex min-h-11 items-center gap-2 rounded-full bg-primary px-4 text-[13.5px] font-semibold text-primary-foreground transition-transform duration-120 active:scale-[0.98]"
+          >
+            <PenLine className="size-4" strokeWidth={2.4} />
+            <span>New mail</span>
+          </button>
+        </nav>
+      )}
 
       <InputModal
         isOpen={modalState.type === 'create-group'}
@@ -395,20 +977,39 @@ const AuthorizedLayout = () => {
         onConfirm={(name) => renameGroup(modalState.id, name)}
       />
       <ConfirmModal
-        isOpen={modalState.type === 'delete-email'}
+        isOpen={modalState.type === 'delete-forever'}
         onClose={() => setModalState({ type: null })}
-        title="Delete Email"
-        description="Permanently delete this email? This cannot be undone."
-        confirmText="Delete"
-        onConfirm={() => { deleteEmail(modalState.uid); setModalState({ type: null }) }}
+        title="Delete for good"
+        description={`${modalState.noTrash ? 'This mail server has no Trash yet, so a delete cannot be taken back. ' : ''}Delete ${modalState.uids?.length === 1 ? 'this message' : `${modalState.uids?.length ?? 0} messages`} for good? This cannot be undone.`}
+        confirmText={modalState.uids?.length === 1 ? 'Delete for good' : `Delete ${modalState.uids?.length ?? 0} for good`}
+        onConfirm={async () => {
+          const list = modalState.uids ?? []
+          setModalState({ type: null })
+          const { gone, failed } = await trash.deleteForever(list, { sentUids })
+          // Off every list the screen holds, not only the trash's.
+          if (gone.length) forget(gone)
+          setCheckedUids(new Set(failed))
+          openNeighbour(gone)
+        }}
+      />
+      <SenderRulesModal
+        isOpen={modalState.type === 'sender-rules'}
+        group={groups.find((g) => g.uid === modalState.groupUid) ?? null}
+        onSave={saveSenderRules}
+        onClose={() => setModalState({ type: null })}
       />
       <ConfirmModal
-        isOpen={modalState.type === 'delete-selected'}
+        isOpen={modalState.type === 'empty-trash'}
         onClose={() => setModalState({ type: null })}
-        title="Delete Selected"
-        description={`Permanently delete ${checkedUids.size} email${checkedUids.size !== 1 ? 's' : ''}? This cannot be undone.`}
-        confirmText={`Delete ${checkedUids.size}`}
-        onConfirm={deleteSelected}
+        title="Empty trash"
+        description={`Delete all ${trash.items.length} message${trash.items.length !== 1 ? 's' : ''} in Trash for good? This cannot be undone.`}
+        confirmText="Empty trash"
+        onConfirm={async () => {
+          setModalState({ type: null })
+          await trash.empty()
+          setSelectedUid(null)
+          setCheckedUids(new Set())
+        }}
       />
       <ConfirmModal
         isOpen={modalState.type === 'delete-group'}
@@ -420,6 +1021,7 @@ const AuthorizedLayout = () => {
       />
 
       {composeOpen && (
+        <Suspense fallback={null}>
         <ComposeWindow
           myEmail={userEmail}
           onClose={handleComposeClose}
@@ -427,12 +1029,15 @@ const AuthorizedLayout = () => {
           replyData={replyData}
           draftId={composeDraftId}
           onDeleteDraft={handleDeleteDraft}
+          onScheduled={handleScheduled}
+          replaceId={composeReplaceId}
         />
+        </Suspense>
       )}
 
-      <ChangePasswordModal
-        isOpen={showChangePassword}
-        onClose={() => setShowChangePassword(false)}
+      <UnlockModal
+        isOpen={needsUnlock}
+        onUnlocked={() => window.location.reload()}
       />
     </div>
   )

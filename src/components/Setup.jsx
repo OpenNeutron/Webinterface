@@ -7,6 +7,7 @@ import api from '@/api'
 import { storage } from '@/storage'
 import { generateKeyPair, exportPublicKeyBase64, encryptPrivateKey, hashPassword } from '@/crypto'
 import { keySession } from '@/keySession'
+import { cryptoUnavailableMessage, isCryptoUnavailable } from '@/lib/cryptoFailure'
 
 const Setup = () => {
   const token = storage.getToken()
@@ -70,7 +71,7 @@ const SetupForm = () => {
           password: passwordHash,
         })
         activeToken = loginRes.data.token
-        if (loginRes.data.salt) keySession.setSalt(loginRes.data.salt)
+        if (loginRes.data.salt) keySession.setSalt(loginRes.data.salt); storage.setLoginSalt(loginRes.data.salt)
         storage.set({ token: activeToken })
 
         await api.post(
@@ -84,6 +85,10 @@ const SetupForm = () => {
       storage.set({ encrypted_key: encryptedKey, public_key: publicKeyBase64, force_reset: false })
       navigate('/')
     } catch (err) {
+      if (isCryptoUnavailable(err)) {
+        setError(cryptoUnavailableMessage('key setup step'))
+        return
+      }
       if (err.response?.status === 403) {
         setError('Key recovery requires admin privileges. Ask your administrator to delete and recreate your account.')
       } else {
@@ -135,7 +140,7 @@ const SetupForm = () => {
               {loading ? 'Generating keys…' : 'Setup Account'}
             </Button>
             {loading && (
-              <p className="text-xs text-gray-400 text-center">
+              <p className="text-xs text-muted-foreground text-center">
                 Generating RSA-4096 key pair, this may take a moment…
               </p>
             )}

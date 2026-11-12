@@ -1,7 +1,38 @@
 
-import { argon2id, bcrypt } from 'hash-wasm'
+import { argon2id as argon2idRaw, bcrypt as bcryptRaw } from 'hash-wasm'
+
+// Argon2 and bcrypt from hash-wasm are WebAssembly. If the browser refuses to compile
+// wasm — a content blocker, an extension, or a Content-Security-Policy without
+// 'wasm-unsafe-eval' — the call throws something opaque and every caller can only say
+// "failed", which points at the user's password for what is really a policy decision.
+// Tagging the failure lets the screens say what actually happened.
+//
+// This is not hypothetical: a tightened CSP took sign-in down for an hour, and the app
+// reported "Login failed" the whole time.
+function wasmStep(name, fn) {
+  return async (...args) => {
+    try {
+      return await fn(...args)
+    } catch (err) {
+      const message = String(err?.message || err || '')
+      if (/webassembly|wasm|refused to compile|unsupported|not a function/i.test(message)) {
+        const wrapped = new Error(
+          `${name} could not run in this browser (WebAssembly is blocked).`,
+        )
+        wrapped.code = 'crypto_unavailable'
+        wrapped.cause = err
+        throw wrapped
+      }
+      throw err
+    }
+  }
+}
+
+const bcrypt = wasmStep('bcrypt', bcryptRaw)
+const argon2id = wasmStep('argon2id', argon2idRaw)
 import forge from 'node-forge'
 import KeygenWorker from './keygen.worker.js?worker&inline'
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js'
 
 // true when the Web Crypto API is available (requires a secure context / HTTPS)
 export const hasSubtleCrypto = typeof crypto !== 'undefined' && !!crypto.subtle
@@ -103,12 +134,54 @@ export async function hashPassword(password) {
   return bcrypt({ password: enc.encode(password), salt: AUTH_SALT, costFactor: 10, outputType: 'encoded' })
 }
 
-// Derives 44 deterministic bytes (32 key + 12 IV) from password + serverSalt
-async function deriveKeyMaterial(password, serverSalt) {
+// Derives the 32-byte key that wraps a private key.
+//
+// The IV is NOT derived: deriving it meant every wrap of the same key reused
+// the same nonce, which in AES-GCM leaks the XOR of the plaintexts and weakens
+// authentication. Each wrap now draws a random IV (see wrapPrivateKey).
+async function deriveWrapKey(password, serverSalt) {
+  const enc       = new TextEncoder()
+  const saltBytes = hexToBytes(serverSalt)
+  const bcryptOut = await bcrypt({ password: enc.encode(password), salt: saltBytes, costFactor: 10, outputType: 'binary' })
+  return argon2id({ password: bcryptOut, salt: saltBytes, iterations: 3, memorySize: 65536, hashLength: 32, parallelism: 1, outputType: 'binary' })
+}
+
+// Legacy derivation, kept only so blobs written before the fix still open.
+async function deriveLegacyKeyMaterial(password, serverSalt) {
   const enc       = new TextEncoder()
   const saltBytes = hexToBytes(serverSalt)
   const bcryptOut = await bcrypt({ password: enc.encode(password), salt: saltBytes, costFactor: 10, outputType: 'binary' })
   return argon2id({ password: bcryptOut, salt: saltBytes, iterations: 3, memorySize: 65536, hashLength: 44, parallelism: 1, outputType: 'binary' })
+}
+
+// Envelope: "SLW1" | 12-byte IV | ciphertext, base64. The magic prefix lets the
+// reader tell a v1 blob from a legacy one without guessing.
+const WRAP_MAGIC = [0x53, 0x4c, 0x57, 0x31]
+
+function randomBytes(n) {
+  const out = new Uint8Array(n)
+  crypto.getRandomValues(out)
+  return out
+}
+
+function encodeWrap(iv, ciphertext) {
+  const out = new Uint8Array(WRAP_MAGIC.length + iv.length + ciphertext.length)
+  out.set(WRAP_MAGIC, 0)
+  out.set(iv, WRAP_MAGIC.length)
+  out.set(ciphertext, WRAP_MAGIC.length + iv.length)
+  return toB64(out)
+}
+
+function decodeWrap(bytes) {
+  const isV1 = WRAP_MAGIC.every((b, i) => bytes[i] === b)
+  if (isV1 && bytes.length > WRAP_MAGIC.length + 12) {
+    return {
+      legacy: false,
+      iv: bytes.slice(WRAP_MAGIC.length, WRAP_MAGIC.length + 12),
+      ciphertext: bytes.slice(WRAP_MAGIC.length + 12),
+    }
+  }
+  return { legacy: true, iv: null, ciphertext: bytes }
 }
 
 // ─── Key generation ───────────────────────────────────────────────────────────
@@ -149,9 +222,8 @@ export async function exportPublicKeyBase64(publicKey) {
 }
 
 export async function encryptPrivateKey(privateKey, password, serverSalt) {
-  const material  = await deriveKeyMaterial(password, serverSalt)
-  const keyBytes  = material.slice(0, 32)
-  const iv        = material.slice(32, 44)
+  const keyBytes  = await deriveWrapKey(password, serverSalt)
+  const iv        = randomBytes(12)
   const pkcs8Bytes = (privateKey && privateKey._forge)
     ? forgePrivToPkcs8Bytes(privateKey.key)
     : new Uint8Array(await crypto.subtle.exportKey('pkcs8', privateKey))
@@ -159,16 +231,26 @@ export async function encryptPrivateKey(privateKey, password, serverSalt) {
   if (hasSubtleCrypto && !(privateKey && privateKey._forge)) {
     const aesKey    = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt'])
     const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, pkcs8Bytes)
-    return toB64(encrypted)
+    return encodeWrap(iv, new Uint8Array(encrypted))
   }
-  return toB64(forgeAesGcmEncrypt(keyBytes, iv, pkcs8Bytes))
+  return encodeWrap(iv, forgeAesGcmEncrypt(keyBytes, iv, pkcs8Bytes))
 }
 
 export async function decryptPrivateKey(encryptedKey, password, serverSalt) {
-  const material   = await deriveKeyMaterial(password, serverSalt)
-  const keyBytes   = material.slice(0, 32)
-  const iv         = material.slice(32, 44)
-  const cipherData = fromB64(typeof encryptedKey === 'string' ? encryptedKey : encryptedKey.data)
+  const wrapped  = decodeWrap(fromB64(typeof encryptedKey === 'string' ? encryptedKey : encryptedKey.data))
+  const cipherData = wrapped.ciphertext
+
+  let keyBytes
+  let iv
+  if (wrapped.legacy) {
+    // Written before random IVs: the IV was derived from the password.
+    const material = await deriveLegacyKeyMaterial(password, serverSalt)
+    keyBytes = material.slice(0, 32)
+    iv = material.slice(32, 44)
+  } else {
+    keyBytes = await deriveWrapKey(password, serverSalt)
+    iv = wrapped.iv
+  }
 
   let pkcs8Bytes
   if (hasSubtleCrypto) {
@@ -241,7 +323,7 @@ export async function encryptEmail(plaintext, publicKey) {
     const dataOut   = new Uint8Array(12 + aesCipher.length)
     dataOut.set(iv, 0)
     dataOut.set(aesCipher, 12)
-    return { aes_encrypted: btoa(rsaCipher), data_encrypted: toB64(dataOut.buffer) }
+    return { aes_encrypted: toB64(wrapKeyEnvelope(new Uint8Array(rsaCipher)).buffer), data_encrypted: toB64(dataOut.buffer) }
   }
 
   const aesKey    = await crypto.subtle.importKey('raw', aesRaw, { name: 'AES-GCM' }, false, ['encrypt'])
@@ -250,13 +332,243 @@ export async function encryptEmail(plaintext, publicKey) {
   const dataOut   = new Uint8Array(12 + aesCipher.byteLength)
   dataOut.set(iv, 0)
   dataOut.set(new Uint8Array(aesCipher), 12)
-  return { aes_encrypted: toB64(rsaCipher), data_encrypted: toB64(dataOut.buffer) }
+  return { aes_encrypted: toB64(wrapKeyEnvelope(new Uint8Array(rsaCipher)).buffer), data_encrypted: toB64(dataOut.buffer) }
 }
 
-export async function decryptEmail(data, messageKey, privateKey) {
-  if (!messageKey) {
-    return new TextDecoder().decode(fromB64(data))
+
+// --- Wire format versioning -------------------------------------------------
+// The AES key for each message is stored wrapped to the recipient's public key.
+// That blob is the thing a future algorithm change has to replace, so it now
+// carries its own version. Old blobs have no prefix and stay readable forever.
+// "SLK" carries the format, the fourth byte is its version.
+const KEY_ENVELOPE_PREFIX = [0x53, 0x4c, 0x4b]
+const KEY_ENVELOPE_MAGIC = [...KEY_ENVELOPE_PREFIX, 0x01]
+
+function wrapKeyEnvelope(cipherBytes) {
+  const out = new Uint8Array(cipherBytes.length + KEY_ENVELOPE_MAGIC.length)
+  out.set(KEY_ENVELOPE_MAGIC, 0)
+  out.set(cipherBytes, KEY_ENVELOPE_MAGIC.length)
+  return out
+}
+
+function unwrapKeyEnvelope(bytes) {
+  // A blob with no "SLK" is a bare RSA ciphertext from before the envelope existed;
+  // that path stays readable forever.
+  if (!KEY_ENVELOPE_PREFIX.every((b, i) => bytes[i] === b)) return { version: 0, cipher: bytes }
+  // It IS an envelope. A version above 1 was written by a newer build: unwrapping it
+  // as version 1 would silently produce the wrong bytes and blame the account's key.
+  if (bytes[3] !== 0x01) throw newerEnvelopeError(bytes[3], 'key')
+  return { version: 1, cipher: bytes.slice(KEY_ENVELOPE_MAGIC.length) }
+}
+
+
+// ─── Post-quantum at-rest protection ─────────────────────────────────────────
+// Mail is stored under AES-256-GCM with the key wrapped to the account's RSA
+// key. RSA is what a quantum computer breaks, and mail is the data someone
+// harvests today to open later. The wrap is therefore hybrid: the data key comes
+// from an RSA-OAEP seed *and* an ML-KEM-768 shared secret, combined through
+// HKDF. Opening a message needs both halves.
+//
+// Envelope in the message_key slot:  "SLQ" | 0x01 | len(u16 BE) | rsa_ct | mlkem_ct
+// No prefix at all still means "before this existed", which is why old mail keeps
+// opening forever — it can never be re-created, only re-encrypted deliberately.
+
+// "SLQ" carries the format, the fourth byte is its version. Matching the version
+// here is what makes a newer envelope look like garbage to an older client, which
+// then fails with a misleading 'sealed for a different key' — see pqEnvelopeVersion.
+const PQ_PREFIX = [0x53, 0x4c, 0x51]
+// Version 1 mixed the two shared secrets through HKDF and stopped there. Version 2
+// folds both ciphertexts into the info string as well, so the halves of one message
+// cannot be spliced with the halves of another — the transcript binding X-Wing and
+// RFC 9980 both rely on. Old mail stays readable: version 1 keeps its own derivation.
+export const PQ_ENVELOPE_VERSION_UNBOUND = 0x01
+export const PQ_ENVELOPE_VERSION = 0x02
+const PQ_MAGIC = [...PQ_PREFIX, PQ_ENVELOPE_VERSION]
+const PQ_INFO_SALT = 'sloth-mail/atrest/v1'
+// Domain separator for the version-2 transcript digest.
+const PQ_BINDING_LABEL = 'sloth-mail/atrest/v2/binding'
+
+/** Any sealed-for-a-quantum-key envelope, whichever version sealed it. */
+export function isPqEnvelope(bytes) {
+  return bytes.length > 6 && PQ_PREFIX.every((b, i) => bytes[i] === b)
+}
+
+/** The version byte of a quantum envelope, or null when this is not one. */
+export function pqEnvelopeVersion(bytes) {
+  return isPqEnvelope(bytes) ? bytes[3] : null
+}
+
+/**
+ * A version this client does not know must say so. Falling through to the RSA
+ * path would report 'sealed for a different key than this account holds' about a
+ * message that is perfectly intact, sent to this very account, by a newer build.
+ */
+function newerEnvelopeError(version, surface = 'message') {
+  const what = surface === 'key' ? 'This message key is sealed' : 'This message is sealed'
+  const e = new Error(
+    `${what} in a newer format (version ${version}) than this app understands. ` +
+    'Update the app to open it — the message itself is intact.',
+  )
+  e.code = surface === 'key' ? 'key_envelope_newer_version' : 'pq_newer_version'
+  return e
+}
+
+function parsePqEnvelope(bytes) {
+  const rsaLen = (bytes[4] << 8) | bytes[5]
+  return {
+    rsaCiphertext: bytes.slice(6, 6 + rsaLen),
+    mlkemCiphertext: bytes.slice(6 + rsaLen),
   }
+}
+
+/** Generate an ML-KEM-768 keypair for this account. */
+export function generatePqKeyPair() {
+  const pair = ml_kem768.keygen()
+  return { publicKey: pair.publicKey, secretKey: pair.secretKey }
+}
+
+/** Wrap the PQ secret key under the same password-derived key as the RSA key. */
+export async function wrapSecretBytes(bytes, password, serverSalt) {
+  const keyBytes = await deriveWrapKey(password, serverSalt)
+  const iv = randomBytes(12)
+  if (!hasSubtleCrypto) throw new Error('post-quantum keys need a secure connection')
+  const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt'])
+  const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, bytes)
+  return encodeWrap(iv, new Uint8Array(sealed))
+}
+
+export async function unwrapSecretBytes(b64, password, serverSalt) {
+  const wrapped = decodeWrap(fromB64(b64))
+  if (wrapped.legacy) throw new Error('post-quantum key was stored in an unknown format')
+  const keyBytes = await deriveWrapKey(password, serverSalt)
+  const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt'])
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: wrapped.iv }, aesKey, wrapped.ciphertext)
+  return new Uint8Array(plain)
+}
+
+/** HKDF-SHA256 over both shared secrets, bound to the account name. */
+async function combineHybridKey(rsaSeed, mlkemSecret, username, bind = null) {
+  const ikm = new Uint8Array(rsaSeed.length + mlkemSecret.length)
+  ikm.set(new Uint8Array(rsaSeed), 0)
+  ikm.set(new Uint8Array(mlkemSecret), rsaSeed.length)
+  const base = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits'])
+
+  const name = new TextEncoder().encode(username || '')
+  let info = name
+  if (bind) {
+    // The transcript goes into the derivation, not merely alongside it: an attacker
+    // who swaps one ciphertext for another changes the key and the body stops
+    // authenticating, instead of silently opening under a spliced pair.
+    //
+    // Hashed first because WebCrypto caps HKDF `info` at 1024 bytes and the two
+    // ciphertexts together are 1600 — the raw pair does not fit, and a derived key
+    // is the same size either way.
+    const label = new TextEncoder().encode(PQ_BINDING_LABEL)
+    const transcript = new Uint8Array(label.length + bind.rsaCiphertext.length + bind.mlkemCiphertext.length)
+    transcript.set(label, 0)
+    transcript.set(bind.rsaCiphertext, label.length)
+    transcript.set(bind.mlkemCiphertext, label.length + bind.rsaCiphertext.length)
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', transcript))
+    info = new Uint8Array(name.length + digest.length)
+    info.set(name, 0)
+    info.set(digest, name.length)
+  }
+
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new TextEncoder().encode(PQ_INFO_SALT),
+      info,
+    },
+    base,
+    256,
+  )
+  return new Uint8Array(bits)
+}
+
+export async function decryptEmailBytes(data, messageKey, privateKey, pqSecretKey = null, username = '') {
+  // The secret arrives as base64 from sessionStorage and as raw bytes from callers
+  // that already decoded it. Accepting both here means no call site has to know
+  // which, which is how one of them ended up passing a string to decapsulate.
+  if (typeof pqSecretKey === 'string' && pqSecretKey) pqSecretKey = fromB64(pqSecretKey)
+  if (!messageKey) {
+    // No per-recipient key means the message is either plain text from outside
+    // or one we cannot open. Guessing "plain text" renders ciphertext as
+    // gibberish, which looks like corruption and hides the real problem: say so
+    // instead.
+    const decoded = new TextDecoder().decode(fromB64(data))
+    const looksLikeMessage = /^[\s\S]{0,2000}?\n[A-Za-z-]+:/.test(decoded.slice(0, 4000))
+    if (!looksLikeMessage) {
+      throw new Error('no message key for this recipient')
+    }
+    return fromB64(data)
+  }
+
+  const keyBytesRaw = fromB64(messageKey)
+  if (isPqEnvelope(keyBytesRaw)) {
+    const version = pqEnvelopeVersion(keyBytesRaw)
+    if (version !== PQ_ENVELOPE_VERSION && version !== PQ_ENVELOPE_VERSION_UNBOUND) {
+      throw newerEnvelopeError(version)
+    }
+    if (!pqSecretKey) {
+      // Not an error in the message: the session simply has no PQ key loaded,
+      // which is what a cached bundle or a half-finished login looks like.
+      const e = new Error('This message is quantum-protected. Sign out and back in to load this device\'s post-quantum key.')
+      e.code = 'pq_key_missing'
+      throw e
+    }
+    if (!hasSubtleCrypto) {
+      const e = new Error('Quantum-protected messages need a secure HTTPS connection to open.')
+      e.code = 'pq_needs_https'
+      throw e
+    }
+    const { rsaCiphertext, mlkemCiphertext } = parsePqEnvelope(keyBytesRaw)
+    let rsaSeed
+    try {
+      rsaSeed = new Uint8Array(await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, rsaCiphertext))
+    } catch (err) {
+      const e = new Error('message key could not be unwrapped: sealed for a different key than this account holds')
+      e.code = 'key_mismatch'
+      e.cause = err
+      throw e
+    }
+    let mlkemSecret
+    try {
+      mlkemSecret = ml_kem768.decapsulate(mlkemCiphertext, pqSecretKey)
+    } catch (err) {
+      const e = new Error('the post-quantum half of this message could not be opened: it was sealed for a different key')
+      e.code = 'pq_key_mismatch'
+      e.cause = err
+      throw e
+    }
+    // Version 1 derived its key from the secrets alone; version 2 binds the
+    // ciphertexts too, so the derivation has to know which one it is reading.
+    const bind = version === PQ_ENVELOPE_VERSION ? { rsaCiphertext, mlkemCiphertext } : null
+    const hybridKey = await combineHybridKey(rsaSeed, mlkemSecret, username, bind)
+    const aesKeyPq = await crypto.subtle.importKey('raw', hybridKey, { name: 'AES-GCM' }, false, ['decrypt'])
+    const bodyBuf = fromB64(data)
+    let plainPq
+    try {
+      plainPq = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bodyBuf.slice(0, 12) }, aesKeyPq, bodyBuf.slice(12))
+    } catch (err) {
+      // ML-KEM cannot reject a ciphertext: a wrong secret key decapsulates to a
+      // different shared secret rather than an error. So the only place a
+      // mismatched quantum key can surface is right here, and the honest message
+      // names both possibilities instead of blaming the data.
+      const e = new Error(
+        'message body failed authentication: this copy was sealed for a different ' +
+        'post-quantum key than this account holds, or the stored data is damaged',
+      )
+      e.code = 'body_corrupt'
+      e.cause = err
+      throw e
+    }
+    return new Uint8Array(plainPq)
+  }
+
+  const envelope = unwrapKeyEnvelope(fromB64(messageKey))
+  messageKey = toB64(envelope.cipher.buffer ? envelope.cipher.buffer : envelope.cipher)
 
   const useForge = !hasSubtleCrypto || (privateKey && privateKey._forge)
 
@@ -269,14 +581,102 @@ export async function decryptEmail(data, messageKey, privateKey) {
     const iv        = dataBuf.slice(0, 12)
     const ciphertext = dataBuf.slice(12)
     const plain = forgeAesGcmDecrypt(aesRaw, iv, ciphertext)
-    return new TextDecoder().decode(plain)
+    return plain
   }
 
-  const aesRaw = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, fromB64(messageKey))
+  let aesRaw
+  try {
+    aesRaw = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, fromB64(messageKey))
+  } catch (err) {
+    // Distinguish "this message was sealed for a different key" from "the
+    // data is damaged": the fixes are completely different, and both used to
+    // surface as a single opaque failure.
+    const e = new Error('message key could not be unwrapped: sealed for a different key than this account holds')
+    e.code = 'key_mismatch'
+    e.cause = err
+    throw e
+  }
   const aesKey = await crypto.subtle.importKey('raw', aesRaw, { name: 'AES-GCM' }, false, ['decrypt'])
   const dataBuf    = fromB64(data)
   const iv         = dataBuf.slice(0, 12)
   const ciphertext = dataBuf.slice(12)
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext)
-  return new TextDecoder().decode(plain)
+  let plain
+  try {
+    plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext)
+  } catch (err) {
+    const e = new Error('message body failed authentication: the stored data is damaged or truncated')
+    e.code = 'body_corrupt'
+    e.cause = err
+    throw e
+  }
+  return new Uint8Array(plain)
+}
+
+/** Reader-facing wrapper: bytes are for re-sealing, text is for display. */
+export async function decryptEmail(data, messageKey, privateKey, pqSecretKey = null, username = '') {
+  const bytes = await decryptEmailBytes(data, messageKey, privateKey, pqSecretKey, username)
+  return new TextDecoder().decode(bytes)
+}
+
+/**
+ * Seal one copy for a recipient, using the strongest envelope they published.
+ *
+ * Hybrid where the account has an ML-KEM key, RSA alone where it does not — and
+ * **never a fallback**: if the hybrid envelope fails, the send fails. Quietly
+ * downgrading to RSA would hand the sender a message that says "encrypted" while
+ * the half that survives a quantum computer is gone, and nobody would ever know.
+ */
+export async function sealForRecipient(payload, { publicKeyBase64, pqPublicKey }, recipientUsername) {
+  if (!publicKeyBase64) throw new Error('this recipient published no key to seal to')
+  // A message body is text (attachments travel base64 inside it). Taking either
+  // form here keeps the two paths from disagreeing about what they were handed:
+  // encryptEmail encodes a string, and handing it bytes would encrypt the string
+  // "83,117,98,…" instead of the message.
+  const text = typeof payload === 'string' ? payload : new TextDecoder().decode(payload)
+  if (pqPublicKey) {
+    const bytes = new TextEncoder().encode(text)
+    const { data, messageKey } = await sealHybridPayload(bytes, publicKeyBase64, pqPublicKey, recipientUsername)
+    return { aes_encrypted: messageKey, data_encrypted: data, e2ee: true, hybrid: true }
+  }
+  const rsaKey = await importPublicKeyBase64(publicKeyBase64)
+  const { aes_encrypted, data_encrypted } = await encryptEmail(text, rsaKey)
+  return { aes_encrypted, data_encrypted, e2ee: true, hybrid: false }
+}
+
+/**
+ * Seal bytes under both the RSA and the ML-KEM public key of an account.
+ *
+ * Used to move mail that was stored before post-quantum protection existed into
+ * the hybrid envelope: the browser does the sealing because only it can open the
+ * old message first, and the plaintext never leaves the machine.
+ */
+export async function sealHybridPayload(bytes, rsaPublicKeyBase64, pqPublicKeyBase64, username) {
+  if (!hasSubtleCrypto) throw new Error('re-sealing needs a secure HTTPS connection')
+  const rsaPublic = await crypto.subtle.importKey(
+    'spki', fromB64(rsaPublicKeyBase64), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt'],
+  )
+  const seed = randomBytes(32)
+  const rsaCiphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsaPublic, seed))
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(fromB64(pqPublicKeyBase64))
+  const keyBytes = await combineHybridKey(seed, sharedSecret, username, {
+    rsaCiphertext,
+    mlkemCiphertext: cipherText,
+  })
+
+  const iv = randomBytes(12)
+  const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt'])
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, bytes))
+
+  const body = new Uint8Array(12 + sealed.length)
+  body.set(iv, 0)
+  body.set(sealed, 12)
+
+  const envelope = new Uint8Array(6 + rsaCiphertext.length + cipherText.length)
+  envelope.set(PQ_MAGIC, 0)
+  envelope[4] = (rsaCiphertext.length >> 8) & 0xff
+  envelope[5] = rsaCiphertext.length & 0xff
+  envelope.set(rsaCiphertext, 6)
+  envelope.set(cipherText, 6 + rsaCiphertext.length)
+
+  return { data: toB64(body.buffer), messageKey: toB64(envelope.buffer) }
 }
