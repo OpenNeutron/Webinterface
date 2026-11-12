@@ -100,8 +100,8 @@ const AuthorizedLayout = () => {
 
   const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore } = useEmailFetch()
   const { sentUids, setSentUids, fetchSentUids, fetchSentPreviews } = useSentEmails(setPreviews)
-  const { markRead, markUnread, toggleStar, deleteEmail, moveToGroup, removeFromGroup } = useEmailActions({
-    emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups,
+  const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, moveToGroup, removeFromGroup } = useEmailActions({
+    emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups, sentUids, setSentUids,
   })
   const { createGroup, renameGroup, deleteGroup } = useGroupActions({ setGroups, setSelectedFolder, setModalState })
 
@@ -301,30 +301,10 @@ const AuthorizedLayout = () => {
   const deleteSelected = async () => {
     const toDelete = [...checkedUids]
     setModalState({ type: null })
-    const token = storage.getToken()
-    const headers = { Authorization: `Bearer ${token}` }
     // A delete that the server refuses must not vanish from the screen: the row would come back on
-    // the next refresh and look like the app lied. Collect the failures, remove only what went.
-    const failed = []
-    await Promise.all(toDelete.map(async (uid) => {
-      try {
-        await api.post('/email/delete', `{"uid":"${uid}"}`, { headers })
-        for (const g of groups) {
-          if (g.email_uids.includes(uid)) {
-            try { await api.post('/group/remove-email', `{"group_uid":${g.uid},"email_uid":${uid}}`, { headers }) } catch {}
-          }
-        }
-      } catch {
-        failed.push(uid)
-      }
-    }))
-    const gone = toDelete.filter((uid) => !failed.includes(uid))
-    if (gone.length) {
-      setUids(prev => prev.filter(u => !gone.includes(u)))
-      setPreviews(prev => { const n = { ...prev }; gone.forEach(u => delete n[u]); return n })
-      setSelectedUid(prev => (gone.includes(prev) ? null : prev))
-      setGroups(prev => prev.map(g => ({ ...g, email_uids: g.email_uids.filter(u => !gone.includes(u)) })))
-    }
+    // the next refresh and look like the app lied. Only what went leaves; sent copies use their own
+    // delete (useEmailActions), which is why Sent used to refuse every one of them.
+    const { gone, failed } = await deleteMany(toDelete)
     // Whatever did not delete stays checked, so the person can press it again rather than hunt rows.
     setCheckedUids(new Set(failed))
     if (failed.length) {
