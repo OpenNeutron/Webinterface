@@ -30,7 +30,6 @@ import useSearchShortcut from '@/hooks/useSearchShortcut'
 
 // The editor (Tiptap) and the sending code load when a message is first written.
 const ComposeWindow = lazy(() => import('@/components/ComposeWindow'))
-const PAGE_SIZE = 20
 
 const AuthorizedLayout = () => {
   const [selectedUid, setSelectedUid] = useState(null)
@@ -39,7 +38,6 @@ const AuthorizedLayout = () => {
   useSearchShortcut()
   const [searchQuery, setSearchQuery] = useState('')
   const [filterMode, setFilterMode] = useState('all')
-  const [page, setPage] = useState(0)
   const [emailMeta, setEmailMeta] = useState(() => storage.getEmailMeta())
   const [groups, setGroups] = useState([])
   const [checkedUids, setCheckedUids] = useState(new Set())
@@ -343,13 +341,15 @@ const AuthorizedLayout = () => {
   }, [unreadForBadge])
   useEffect(() => () => { document.title = 'Sloth Lee Mail' }, [])
 
-  const pageCount = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE))
-  const safePage = Math.min(page, pageCount - 1)
-  const pageStart = totalFiltered === 0 ? 0 : safePage * PAGE_SIZE + 1
-  const pageEnd = Math.min((safePage + 1) * PAGE_SIZE, totalFiltered)
-  const pagedUids = filteredUids.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
-
-  useEffect(() => { setPage(0) }, [selectedFolder, filterMode, searchQuery])
+  // One list, not pages. The list used to show 20 loaded messages per page while "Load older mail"
+  // appended the next 20 to page two, so pressing it changed nothing on screen; and twenty alerts
+  // in one conversation filled page one with a single row, hiding everything older. Everything
+  // loaded is shown, and Load older mail (or reaching the end of the list) adds to the bottom.
+  const pageCount = 1
+  const safePage = 0
+  const pageStart = totalFiltered === 0 ? 0 : 1
+  const pageEnd = totalFiltered
+  const pagedUids = filteredUids
 
   const { fetchTrash } = trash
   useEffect(() => {
@@ -796,7 +796,7 @@ const AuthorizedLayout = () => {
                 hasMore={selectedFolder === 'inbox' && hasMore}
                 groups={groups}
                 filterMode={filterMode}
-                onFilterModeChange={(m) => { setFilterMode(m); setPage(0) }}
+                onFilterModeChange={setFilterMode}
                 onToggleSelectAll={handleToggleSelectAll}
                 allChecked={pagedUids.length > 0 && pagedUids.every(uid => checkedUids.has(uid))}
                 onDeleteSelected={deleteSelected}
@@ -804,12 +804,6 @@ const AuthorizedLayout = () => {
                 onMarkSelectedRead={markSelectedRead}
                 onMarkSelectedUnread={markSelectedUnread}
                 onMoveSelectedToGroup={moveSelectedToGroup}
-                onPrevPage={() => setPage(p => Math.max(0, p - 1))}
-                onNextPage={() => {
-                  const next = safePage + 1
-                  setPage(next)
-                  if (next >= pageCount - 1 && hasMore) loadMore()
-                }}
                 onRefresh={handleRefresh}
                 refreshing={loading || refreshing}
               />

@@ -40,6 +40,27 @@ const EmailList = ({
 }) => {
   const scroller = useRef(null)
   const { pull, busy, ready } = usePullToRefresh(scroller, onRefresh)
+
+  // Reaching the end of the list loads the next older page, the way a phone mail app scrolls on
+  // forever. Also when the end is on screen from the start: twenty alerts folded into one
+  // conversation leave a nearly empty screen, and older mail should fill it without a press.
+  const endMarker = useRef(null)
+  const loadMoreRef = useRef(onLoadMore)
+  useEffect(() => {
+    loadMoreRef.current = onLoadMore
+  }, [onLoadMore])
+  useEffect(() => {
+    const el = endMarker.current
+    if (!el || !hasMore || loading || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreRef.current?.()
+      },
+      { root: scroller.current, rootMargin: '0px 0px 400px 0px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loading, uids.length])
   // Which conversation rows are open. Keyed by thread key, not uid.
   const [expandedThreads, setExpandedThreads] = useState(() => new Set())
 
@@ -361,7 +382,7 @@ const EmailList = ({
         </div>
 
         {hasMore && (
-          <div className="mx-auto w-full max-w-[1040px] px-4 py-3">
+          <div ref={endMarker} className="mx-auto w-full max-w-[1040px] px-4 py-3">
             <button
               type="button"
               onClick={onLoadMore}

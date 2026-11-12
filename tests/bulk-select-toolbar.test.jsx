@@ -32,7 +32,7 @@ const baseProps = {
 describe('bulk selection toolbar', () => {
   it('offers select-all with the page count while nothing is selected', () => {
     render(<EmailToolbar {...baseProps} />)
-    const button = screen.getByRole('button', { name: /select all 3 messages on this page/i })
+    const button = screen.getByRole('button', { name: /select all 3 messages shown/i })
     expect(button).toBeTruthy()
     expect(button.textContent).toContain('Select all')
     expect(button.textContent).toContain('3')
