@@ -168,10 +168,10 @@ export function useEmailActions({
     try {
       for (const g of groups) {
         if (g.uid !== groupId && g.email_uids.includes(emailUid)) {
-          await api.post('/group/remove-email', `{"group_uid":${g.uid},"email_uid":${emailUid}}`, { headers: headers() })
+          await api.post('/group/remove-email', `{"group_uid":"${g.uid}","email_uid":"${emailUid}"}`, { headers: headers() })
         }
       }
-      await api.post('/group/add-email', `{"group_uid":${groupId},"email_uid":${emailUid}}`, { headers: headers() })
+      await api.post('/group/add-email', `{"group_uid":"${groupId}","email_uid":"${emailUid}"}`, { headers: headers() })
     } catch {
       toast('Could not move that message. It is where it was.')
       return
@@ -184,7 +184,7 @@ export function useEmailActions({
 
   const removeFromGroup = async (emailUid, groupId) => {
     try {
-      await api.post('/group/remove-email', `{"group_uid":${groupId},"email_uid":${emailUid}}`, { headers: headers() })
+      await api.post('/group/remove-email', `{"group_uid":"${groupId}","email_uid":"${emailUid}"}`, { headers: headers() })
     } catch {
       toast('Could not take that message out of the group.')
       return

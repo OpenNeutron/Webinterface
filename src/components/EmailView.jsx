@@ -29,6 +29,7 @@ import {
   Lock,
   Flame,
   Undo2,
+  Filter,
 } from 'lucide-react'
 import api from '@/api'
 import { storage } from '@/storage'
@@ -73,6 +74,10 @@ const EmailView = ({
   onComposeTo,
   onMessageDeleted,
   onBack,
+  // Sender actions: file this sender's mail into a group as it arrives, or delete what is here.
+  onFileSender = null,
+  onDeleteFromSender = null,
+  countFromSender = null,
 }) => {
   const [email, setEmail] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -120,6 +125,12 @@ const EmailView = ({
   const isStarred = emailMeta?.starred === true
   const isUnread = emailMeta?.unread !== false
   const isInGroup = selectedFolder && selectedFolder !== 'inbox' && selectedFolder !== 'starred'
+  // Not for your own sent copies: filing or bulk-deleting "mail from me" is not what anyone means.
+  const senderAddress = (email?.from?.email || '').toLowerCase()
+    && (email.from.email || '').toLowerCase() !== (myEmail || '').toLowerCase()
+    ? email.from.email.toLowerCase()
+    : ''
+  const fromSenderCount = senderAddress && countFromSender ? countFromSender(senderAddress) : 0
 
   useEffect(() => {
     if (uid === null) {
@@ -282,6 +293,37 @@ const EmailView = ({
                 <DropdownMenuItem onClick={() => onRemoveFromGroup(uid)}>
                   <X className="size-4" /> Remove from group
                 </DropdownMenuItem>
+              )}
+              {senderAddress && onFileSender && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Filter className="size-4" /> Always file this sender in…
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent>
+                      {groups.length > 0 ? groups.map((g) => {
+                        const already = (g.filter_addresses ?? []).includes(senderAddress)
+                        return (
+                          <DropdownMenuItem key={g.uid} disabled={already} onClick={() => onFileSender(senderAddress, g.uid)}>
+                            <Folder className="size-4" /> {g.title}{already ? ' — already' : ''}
+                          </DropdownMenuItem>
+                        )
+                      }) : (
+                        <DropdownMenuItem disabled>
+                          <span className="text-ink-3">Make a group first</span>
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+              )}
+              {senderAddress && onDeleteFromSender && fromSenderCount > 1 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem destructive onClick={() => onDeleteFromSender(senderAddress)}>
+                    <Trash2 className="size-4" /> Delete all {fromSenderCount} from this sender
+                  </DropdownMenuItem>
+                </>
               )}
             </DropdownMenuContent>
           </DropdownMenuRoot>
