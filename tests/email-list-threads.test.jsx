@@ -64,7 +64,7 @@ describe('EmailList threading render', () => {
   it('expands a conversation to show its messages', () => {
     render(<EmailList {...props} />)
     expect(screen.queryByText(/a:Thread demo/)).toBeNull()
-    fireEvent.click(screen.getByTestId('thread-group').querySelector('button'))
+    fireEvent.click(screen.getByTestId('thread-group').querySelector('[aria-expanded]'))
     expect(screen.getByText(/a:Thread demo/)).toBeTruthy()
     expect(screen.getByText(/b:Re: Thread demo/)).toBeTruthy()
   })
@@ -85,5 +85,21 @@ describe('EmailList threading render', () => {
   it('offers no conversation delete where the folder cannot delete', () => {
     render(<EmailList {...props} />)
     expect(screen.queryByRole('button', { name: /Delete conversation/ })).toBeNull()
+  })
+})
+
+describe('a conversation can be selected and deleted from the list', () => {
+  it('its box selects every message in it, without opening it', () => {
+    const onCheckThread = vi.fn()
+    const onSelect = vi.fn()
+    render(<EmailList {...props} onSelect={onSelect} onCheckThread={onCheckThread} onDeleteThread={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Select conversation \(2 messages\)/ }))
+    expect(onCheckThread).toHaveBeenCalledWith(['a', 'b'])
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('shows as selected when all of it is checked', () => {
+    render(<EmailList {...props} checkedUids={new Set(['a', 'b'])} onCheckThread={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Unselect conversation/ }).getAttribute('aria-pressed')).toBe('true')
   })
 })

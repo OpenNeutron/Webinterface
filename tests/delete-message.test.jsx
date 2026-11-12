@@ -87,12 +87,29 @@ describe('Delete moves to Trash, from any folder', () => {
     expect(toast).toHaveBeenCalledWith(expect.stringMatching(/not deleted/))
   })
 
-  it('a server without Trash says it needs its update, and deletes nothing', async () => {
+  // The live server had not been updated for Trash, so every delete answered "this mail server
+  // needs its update" and nothing could be deleted at all. Now the caller is told there is no
+  // Trash, and offers the delete the server can do — for good, after asking.
+  it('a server without Trash moves nothing and says so to the caller, not as a dead end', async () => {
     post.mockRejectedValue(Object.assign(new Error('404'), { response: { status: 404, data: { code: 'not_found' } } }))
     const { result } = renderHook(() => useHarness())
-    await act(async () => { await result.current.actions.deleteEmail(INBOX) })
+    let outcome
+    await act(async () => { outcome = await result.current.actions.deleteEmail(INBOX) })
+    expect(outcome).toBe('no-trash')
     expect(result.current.uids).toEqual([INBOX])
-    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/needs its update/))
+    expect(toast).not.toHaveBeenCalled()
+    let many
+    await act(async () => { many = await result.current.actions.deleteMany([INBOX, SENT]) })
+    expect(many.missingRoute).toBe(true)
+    expect(many.gone).toEqual([])
+  })
+
+  it('forget takes a message off every list the screen holds', async () => {
+    const { result } = renderHook(() => useHarness())
+    act(() => { result.current.actions.forget([SENT, INBOX]) })
+    expect(result.current.uids).toEqual([])
+    expect(result.current.sentUids).toEqual([])
+    expect(result.current.selectedUid).toBe(null)
   })
 
   it('a mixed selection moves what it can and returns what failed', async () => {
@@ -146,6 +163,16 @@ describe('the Trash folder', () => {
     expect(post).toHaveBeenCalledWith('/email/sent/delete', `{"uid":"${SENT}"}`, expect.anything())
     expect(post).toHaveBeenCalledWith('/email/delete', `{"uid":"${INBOX}"}`, expect.anything())
     expect(result.current.items).toEqual([])
+  })
+
+  it('with no Trash, delete for good still finds each message’s own list', async () => {
+    post.mockResolvedValue({ data: {} })
+    const { result } = renderHook(() => useTrashHarness())
+    let outcome
+    await act(async () => { outcome = await result.current.deleteForever([SENT, INBOX], { sentUids: [SENT] }) })
+    expect(post).toHaveBeenCalledWith('/email/sent/delete', `{"uid":"${SENT}"}`, expect.anything())
+    expect(post).toHaveBeenCalledWith('/email/delete', `{"uid":"${INBOX}"}`, expect.anything())
+    expect(outcome.gone).toEqual([SENT, INBOX])
   })
 
   it('a server without Trash marks the folder unavailable instead of empty', async () => {

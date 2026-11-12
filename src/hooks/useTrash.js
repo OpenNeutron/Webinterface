@@ -59,12 +59,17 @@ export function useTrash({ fetchPreviewsFor, fetchSentPreviews, setPreviews, onR
     return { back, failed }
   }, [onRestored])
 
-  /** Permanent. The caller has already asked. */
-  const deleteForever = useCallback(async (uids) => {
+  /**
+   * Permanent. The caller has already asked. `sentUids` says which list a message belongs to
+   * when it is not in the trash (a server with no Trash deletes straight from the folder).
+   */
+  const deleteForever = useCallback(async (uids, { sentUids = [] } = {}) => {
     const kinds = new Map(items.map((item) => [item.uid, item.kind]))
+    const sent = new Set(sentUids.map(String))
+    const kindOf = (uid) => kinds.get(String(uid)) ?? (sent.has(String(uid)) ? 'sent' : 'inbox')
     const failed = []
     await Promise.all(uids.map(async (uid) => {
-      try { await deleteForeverApi(uid, kinds.get(String(uid))) } catch { failed.push(uid) }
+      try { await deleteForeverApi(uid, kindOf(uid)) } catch { failed.push(uid) }
     }))
     const gone = uids.filter((uid) => !failed.includes(uid))
     drop(gone)

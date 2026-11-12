@@ -51,7 +51,8 @@ export function EmailToolbar({
   // label squeezed into a row with the filters.
   const showPager = pageCount > 1
 
-  const action = 'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] transition-colors duration-120'
+  // Thumb-sized on a phone: these are the only way to act on a selection there.
+  const action = 'flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] transition-colors duration-120 max-sm:min-h-11 max-sm:min-w-11'
 
   return (
     <div className="border-b border-line">
@@ -111,7 +112,7 @@ export function EmailToolbar({
             title="Mark as read"
             aria-label="Mark selected as read"
           >
-            <MailOpen className="size-3.5" />
+            <MailOpen className="size-3.5 max-sm:size-4" />
           </button>
           <button
             type="button"
@@ -120,7 +121,7 @@ export function EmailToolbar({
             title="Mark as unread"
             aria-label="Mark selected as unread"
           >
-            <Mail className="size-3.5" />
+            <Mail className="size-3.5 max-sm:size-4" />
           </button>
           {groups.length > 0 && (
             <DropdownMenuRoot>
@@ -164,8 +165,10 @@ export function EmailToolbar({
             title={`${onRestoreSelected ? 'Delete for good' : 'Delete'} ${selected} selected message${selected !== 1 ? 's' : ''}`}
             aria-label={`${onRestoreSelected ? 'Delete for good' : 'Delete'} ${selected} selected message${selected !== 1 ? 's' : ''}`}
           >
-            <Trash2 className="size-3.5" />
-            <span className="hidden font-medium sm:inline">{onRestoreSelected ? 'Delete for good' : 'Delete'} {selected}</span>
+            <Trash2 className="size-3.5 max-sm:size-4" />
+            {/* Worded on a phone too: it is the action people select things for, and an icon
+                alone in red reads as a warning, not a button. */}
+            <span className="font-medium">{onRestoreSelected ? 'Delete for good' : 'Delete'}<span className="max-sm:hidden"> {selected}</span></span>
           </button>
         </div>
       )}

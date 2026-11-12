@@ -198,11 +198,12 @@ export function EmailListItem({
       </div>
 
       {/* Actions occupy the space the timestamp already holds, so hovering moves
-          nothing. */}
+          nothing. Not on a touch screen: there they were invisible but still there, over the
+          time, waiting to be hit by accident. A finger swipes the row or holds it instead. */}
       <div
         className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md border border-line bg-card/95 px-1 py-0.5 shadow-sm transition-opacity duration-120 ${
           menuOpen ? 'opacity-100' : 'opacity-0 group-hover/item:opacity-100'
-        }`}
+        } pointer-coarse:hidden`}
       >
         <button
           type="button"
