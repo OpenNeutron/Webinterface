@@ -97,7 +97,7 @@ export function EmailToolbar({
         </div>
       ) : (
         <div className="flex items-center gap-1">
-          <span className="mr-1 mono text-[11.5px] text-ink-2">{selected} selected</span>
+          <span className="mr-1 mono whitespace-nowrap text-[11.5px] text-ink-2">{selected} selected</span>
           <button
             type="button"
             onClick={onMarkSelectedRead}
@@ -181,7 +181,7 @@ export function EmailToolbar({
           </>
         )}
         {!showPager && totalFiltered > 0 && (
-          <span className="mono text-[11.5px] text-ink-3">
+          <span className="mono text-[11.5px] text-ink-3 max-sm:hidden">
             {totalFiltered} {totalFiltered === 1 ? 'message' : 'messages'}
           </span>
         )}
