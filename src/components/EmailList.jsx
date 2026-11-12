@@ -273,7 +273,7 @@ const EmailList = ({
               type="button"
               onClick={onLoadMore}
               disabled={loading}
-              className="w-full rounded-lg border border-line py-2.5 text-[12.5px] text-ink-2 transition-colors duration-120 hover:border-line-strong hover:text-ink-1 disabled:opacity-50"
+              className="w-full rounded-lg border border-line py-2.5 text-[12.5px] text-ink-2 transition-colors duration-120 hover:border-line-strong hover:text-ink-1 disabled:opacity-50 max-sm:min-h-11"
             >
               {loading ? 'Loading…' : 'Load older mail'}
             </button>

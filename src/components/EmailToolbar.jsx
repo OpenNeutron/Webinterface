@@ -45,7 +45,11 @@ export function EmailToolbar({
   refreshing,
 }) {
   const selected = checkedUids.size
-  const showPager = pageCount > 1 || hasMore
+  // Paging through what is loaded and growing the loaded window are two different jobs:
+  // the chevrons belong to the first, "Load older mail" to the second. When only one page is
+  // loaded the chevrons did nothing Load older mail did not already do, at the cost of a range
+  // label squeezed into a row with the filters.
+  const showPager = pageCount > 1
 
   const action = 'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] transition-colors duration-120'
 
@@ -169,8 +173,12 @@ export function EmailToolbar({
       <div className="ml-auto flex items-center gap-2">
         {showPager && (
           <>
-            <span className="mono text-[11.5px] text-ink-3">
-              {pageStart}–{pageEnd} of {totalFiltered}
+            {/* Nowrap and no shrink: at 390 px this label was crushed to 14 px wide and wrapped
+                into four lines — "1– / 20 / of / 20" — which pushed the whole filter row taller
+                than a message row. The range steps aside on a phone; the chevrons and Load older
+                mail already say where the rest of the mail is. */}
+            <span className="mono whitespace-nowrap text-[11.5px] text-ink-3 shrink-0 max-sm:hidden">
+              {pageStart}–{pageEnd}{hasMore ? '+' : ` of ${totalFiltered}`}
             </span>
             <div className="flex items-center">
               <button
