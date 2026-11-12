@@ -221,14 +221,18 @@ const EmailList = ({
             ? `Nothing matches “${searchQuery.trim().slice(0, 40)}”`
             : filtered
               ? `No ${filterMode} mail in ${folderLabel || 'this folder'}`
-              : `Nothing in ${folderLabel || 'this folder'} yet`
+              : selectedFolder === 'trash'
+                ? 'Trash is empty'
+                : `Nothing in ${folderLabel || 'this folder'} yet`
           const note = searching
             ? 'Search runs over sender, subject and the beginning of each message. Try fewer words.'
             : filtered
               ? 'Every message here is the other way round. Clear the filter to see them.'
               : selectedFolder === 'inbox'
                 ? 'Mail addressed to you lands here the moment it arrives. Nothing has arrived yet.'
-                : 'Messages appear here once there are some. Nothing has been filed here yet.'
+                : selectedFolder === 'trash'
+                  ? 'What you delete from any folder waits here, so a slip can be taken back.'
+                  : 'Messages appear here once there are some. Nothing has been filed here yet.'
           return (
             <div className="flex flex-col items-center px-8 py-14 text-center">
               <EmptyArt kind={art} className="h-14 w-[74px] text-ink-4" />

@@ -10,12 +10,12 @@ import { ConfirmModal, InputModal } from '@/components/ui/Modal'
 import { TopBar } from '@/components/TopBar'
 import SetupStrip from '@/components/SetupStrip'
 import { fetchPostQuantumStatus } from '@/lib/pqSetup'
-import { toast } from '@/lib/toast'
 import { hasIdentity } from '@/pgp'
 import { UnlockModal } from '@/components/UnlockModal'
 import { EmailToolbar } from '@/components/EmailToolbar'
 import { useEmailFetch } from '@/hooks/useEmailFetch'
 import { useSentEmails } from '@/hooks/useSentEmails'
+import { useTrash } from '@/hooks/useTrash'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { useGroupActions } from '@/hooks/useGroupActions'
 import { keySession } from '@/keySession'
@@ -98,10 +98,23 @@ const AuthorizedLayout = () => {
   const [needsUnlock, setNeedsUnlock] = useState(false)
   const [serverStatus, setServerStatus] = useState('checking')
 
-  const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore } = useEmailFetch()
+  const { uids, setUids, previews, setPreviews, loading, hasMore, fetchEmails, loadMore, fetchPreviewsFor } = useEmailFetch()
   const { sentUids, setSentUids, fetchSentUids, fetchSentPreviews } = useSentEmails(setPreviews)
+  // After a restore (Undo, or from Trash) the folders are read again: the server knows where
+  // each message goes back to, in its order.
+  const reloadFolders = useCallback(async () => {
+    await fetchEmails(0)
+    const sent = await fetchSentUids()
+    if (sent.length) await fetchSentPreviews(sent)
+  }, [fetchEmails, fetchSentUids, fetchSentPreviews])
+  const trash = useTrash({ fetchPreviewsFor, fetchSentPreviews, setPreviews, onRestored: reloadFolders })
   const { markRead, markUnread, toggleStar, deleteEmail, deleteMany, moveToGroup, removeFromGroup } = useEmailActions({
-    emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups, sentUids, setSentUids,
+    emailMeta, setEmailMeta, setUids, setPreviews, setSelectedUid, setGroups, groups, setSentUids,
+    onTrashed: trash.addTrashed,
+    onRestored: async (back) => {
+      if (back.length) trash.fetchTrash()
+      await reloadFolders()
+    },
   })
   const { createGroup, renameGroup, deleteGroup } = useGroupActions({ setGroups, setSelectedFolder, setModalState })
 
@@ -182,6 +195,7 @@ const AuthorizedLayout = () => {
     if (selectedFolder === 'starred') return uids.filter((uid) => emailMeta[uid]?.starred)
     if (selectedFolder === 'sent') return sentUids
     if (selectedFolder === 'drafts') return drafts.map((d) => d.id)
+    if (selectedFolder === 'trash') return trash.items.map((item) => item.uid)
     const group = groups.find((g) => g.uid === selectedFolder)
     if (group) return group.email_uids.filter((uid) => uids.includes(uid) || sentUids.includes(uid))
     return uids
@@ -237,6 +251,11 @@ const AuthorizedLayout = () => {
 
   useEffect(() => { setPage(0) }, [selectedFolder, filterMode, searchQuery])
 
+  const { fetchTrash } = trash
+  useEffect(() => {
+    if (selectedFolder === 'trash') fetchTrash()
+  }, [selectedFolder, fetchTrash])
+
   useEffect(() => {
     if (selectedFolder === 'sent') {
       fetchSentUids().then((uids) => {
@@ -251,6 +270,7 @@ const AuthorizedLayout = () => {
     if (selectedFolder === 'starred') return 'Starred'
     if (selectedFolder === 'sent') return 'Sent'
     if (selectedFolder === 'drafts') return 'Drafts'
+    if (selectedFolder === 'trash') return 'Trash'
     return groups.find((g) => g.uid === selectedFolder)?.title ?? 'Inbox'
   })()
 
@@ -298,22 +318,29 @@ const AuthorizedLayout = () => {
     })
   }
 
+  // Delete moves to Trash with an Undo, so it no longer asks first. Only in Trash is a delete
+  // permanent, and only there does it ask.
   const deleteSelected = async () => {
     const toDelete = [...checkedUids]
     setModalState({ type: null })
-    // A delete that the server refuses must not vanish from the screen: the row would come back on
-    // the next refresh and look like the app lied. Only what went leaves; sent copies use their own
-    // delete (useEmailActions), which is why Sent used to refuse every one of them.
-    const { gone, failed } = await deleteMany(toDelete)
-    // Whatever did not delete stays checked, so the person can press it again rather than hunt rows.
-    setCheckedUids(new Set(failed))
-    if (failed.length) {
-      toast(gone.length
-        ? `Deleted ${gone.length}. ${failed.length} could not be deleted — still selected.`
-        : `Nothing was deleted: the server refused ${failed.length}. Still selected.`)
-    } else {
-      toast(`Deleted ${gone.length} email${gone.length !== 1 ? 's' : ''}`)
+    if (selectedFolder === 'trash') {
+      setModalState({ type: 'delete-forever', uids: toDelete })
+      return
     }
+    // A delete the server refuses must not vanish from the screen; what did not move stays checked.
+    const { failed } = await deleteMany(toDelete)
+    setCheckedUids(new Set(failed))
+  }
+
+  const restoreSelected = async () => {
+    const { failed } = await trash.restore([...checkedUids])
+    setCheckedUids(new Set(failed))
+  }
+
+  const deleteOne = (uid) => {
+    if (String(uid).startsWith('draft_')) return handleDeleteDraft(uid)
+    if (selectedFolder === 'trash') return setModalState({ type: 'delete-forever', uids: [uid] })
+    return deleteEmail(uid)
   }
 
   const markSelectedRead = () => {
@@ -475,6 +502,7 @@ const AuthorizedLayout = () => {
             uids={uids}
             sentCount={sentUids.length}
             draftsCount={drafts.length}
+            trashCount={trash.items.length}
             onCompose={() => setComposeOpen(true)}
             onOpenSettings={() => navigate('/settings')}
           />
@@ -508,6 +536,7 @@ const AuthorizedLayout = () => {
                 uids={uids}
                 sentCount={sentUids.length}
                 draftsCount={drafts.length}
+                trashCount={trash.items.length}
                 onCompose={() => { setNavOpen(false); setComposeOpen(true) }}
                 onOpenSettings={() => { setNavOpen(false); navigate('/settings') }}
               />
@@ -559,7 +588,8 @@ const AuthorizedLayout = () => {
                 onFilterModeChange={(m) => { setFilterMode(m); setPage(0) }}
                 onToggleSelectAll={handleToggleSelectAll}
                 allChecked={pagedUids.length > 0 && pagedUids.every(uid => checkedUids.has(uid))}
-                onDeleteSelected={() => setModalState({ type: 'delete-selected' })}
+                onDeleteSelected={deleteSelected}
+                onRestoreSelected={selectedFolder === 'trash' ? restoreSelected : null}
                 onMarkSelectedRead={markSelectedRead}
                 onMarkSelectedUnread={markSelectedUnread}
                 onMoveSelectedToGroup={moveSelectedToGroup}
@@ -572,6 +602,26 @@ const AuthorizedLayout = () => {
                 onRefresh={handleRefresh}
                 refreshing={loading}
               />
+              )}
+              {selectedFolder === 'trash' && (
+                <div className="border-b border-line">
+                  <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-4 py-2 text-[12px] text-ink-2">
+                    <span className="min-w-0 flex-1">
+                      {trash.available
+                        ? `Deleted mail waits here for ${trash.retentionDays} days, then it is deleted for good. Restore puts it back where it was.`
+                        : 'Trash needs the latest mail server. Until it is updated, nothing can be moved here.'}
+                    </span>
+                    {trash.available && trash.items.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setModalState({ type: 'empty-trash' })}
+                        className="shrink-0 rounded-md px-2 py-1 font-medium text-destructive transition-colors duration-120 hover:bg-destructive/10 max-sm:min-h-11"
+                      >
+                        Empty trash
+                      </button>
+                    )}
+                  </div>
+                </div>
               )}
               {selectedFolder === 'sent' && (
                 <ScheduledPanel
@@ -598,10 +648,7 @@ const AuthorizedLayout = () => {
                 onMarkRead={markRead}
                 onMarkUnread={markUnread}
                 onToggleStar={toggleStar}
-                onDeleteEmail={(uid) => {
-                  if (String(uid).startsWith('draft_')) { handleDeleteDraft(uid) }
-                  else setModalState({ type: 'delete-email', uid })
-                }}
+                onDeleteEmail={deleteOne}
                 onMoveToGroup={moveToGroup}
                 onRemoveFromGroup={handleRemoveFromGroup}
                 groups={groups}
@@ -629,7 +676,8 @@ const AuthorizedLayout = () => {
                 onToggleStar={toggleStar}
                 onMarkRead={markRead}
                 onMarkUnread={markUnread}
-                onDeleteEmail={(uid) => setModalState({ type: 'delete-email', uid })}
+                onDeleteEmail={deleteOne}
+                onRestore={selectedFolder === 'trash' ? (uid) => trash.restore([uid]).then(() => setSelectedUid(null)) : null}
                 onMessageDeleted={(uid) => {
                   // The server already deleted it, so drop the row without asking
                   // the delete endpoint again. The open message stays on screen:
@@ -710,20 +758,31 @@ const AuthorizedLayout = () => {
         onConfirm={(name) => renameGroup(modalState.id, name)}
       />
       <ConfirmModal
-        isOpen={modalState.type === 'delete-email'}
+        isOpen={modalState.type === 'delete-forever'}
         onClose={() => setModalState({ type: null })}
-        title="Delete Email"
-        description="Permanently delete this email? This cannot be undone."
-        confirmText="Delete"
-        onConfirm={() => { deleteEmail(modalState.uid); setModalState({ type: null }) }}
+        title="Delete for good"
+        description={`Delete ${modalState.uids?.length === 1 ? 'this message' : `${modalState.uids?.length ?? 0} messages`} for good? This cannot be undone.`}
+        confirmText={modalState.uids?.length === 1 ? 'Delete for good' : `Delete ${modalState.uids?.length ?? 0} for good`}
+        onConfirm={async () => {
+          const list = modalState.uids ?? []
+          setModalState({ type: null })
+          const { failed } = await trash.deleteForever(list)
+          setCheckedUids(new Set(failed))
+          setSelectedUid((prev) => (list.includes(prev) && !failed.includes(prev) ? null : prev))
+        }}
       />
       <ConfirmModal
-        isOpen={modalState.type === 'delete-selected'}
+        isOpen={modalState.type === 'empty-trash'}
         onClose={() => setModalState({ type: null })}
-        title="Delete Selected"
-        description={`Permanently delete ${checkedUids.size} email${checkedUids.size !== 1 ? 's' : ''}? This cannot be undone.`}
-        confirmText={`Delete ${checkedUids.size}`}
-        onConfirm={deleteSelected}
+        title="Empty trash"
+        description={`Delete all ${trash.items.length} message${trash.items.length !== 1 ? 's' : ''} in Trash for good? This cannot be undone.`}
+        confirmText="Empty trash"
+        onConfirm={async () => {
+          setModalState({ type: null })
+          await trash.empty()
+          setSelectedUid(null)
+          setCheckedUids(new Set())
+        }}
       />
       <ConfirmModal
         isOpen={modalState.type === 'delete-group'}

@@ -28,6 +28,7 @@ import {
   Forward,
   Lock,
   Flame,
+  Undo2,
 } from 'lucide-react'
 import api from '@/api'
 import { storage } from '@/storage'
@@ -57,6 +58,8 @@ const EmailView = ({
   onMarkRead,
   onMarkUnread,
   onDeleteEmail,
+  // In Trash: a Restore button, and the delete button deletes for good.
+  onRestore = null,
   onMoveToGroup,
   onRemoveFromGroup,
   groups,
@@ -283,13 +286,24 @@ const EmailView = ({
 
           <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
 
+          {onRestore && (
+            <Button
+              onClick={() => onRestore(uid)}
+              variant="ghost"
+              className="h-8 gap-1.5 px-2.5 text-[12px] text-ink-2 hover:text-ink-1"
+              title="Restore to where it was"
+            >
+              <Undo2 className="size-4" /> Restore
+            </Button>
+          )}
           {/* Destructive: colour, and it sits apart from the rest. */}
           <Button
             onClick={() => onDeleteEmail(uid)}
             variant="ghost"
             size="icon"
             className="size-8 text-ink-3 hover:bg-destructive/10 hover:text-destructive"
-            title="Delete"
+            title={onRestore ? 'Delete for good' : 'Delete (moves to Trash)'}
+            aria-label={onRestore ? 'Delete for good' : 'Delete'}
           >
             <Trash2 className="size-4" />
           </Button>

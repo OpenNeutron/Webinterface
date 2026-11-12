@@ -16,6 +16,7 @@ import {
   Plus,
   FolderPlus,
   Settings,
+  Trash2,
 } from 'lucide-react'
 
 const DEFAULT_FOLDERS = [
@@ -23,6 +24,7 @@ const DEFAULT_FOLDERS = [
   { id: 'starred', icon: Star, label: 'Starred' },
   { id: 'sent', icon: SendHorizontal, label: 'Sent' },
   { id: 'drafts', icon: FileEdit, label: 'Drafts' },
+  { id: 'trash', icon: Trash2, label: 'Trash' },
 ]
 
 // 44px rows on the phone drawer; the desktop rail keeps its denser 36px rhythm.
@@ -48,6 +50,7 @@ const Sidebar = ({
   uids,
   sentCount = 0,
   draftsCount = 0,
+  trashCount = 0,
   onCompose,
   onOpenSettings,
 }) => {
@@ -83,6 +86,7 @@ const Sidebar = ({
     if (id === 'starred') return starredCount
     if (id === 'sent') return sentCount
     if (id === 'drafts') return draftsCount
+    if (id === 'trash') return trashCount
     return 0
   }
 

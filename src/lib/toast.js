@@ -12,9 +12,16 @@ const listeners = new Set()
 
 const emit = () => listeners.forEach((fn) => fn(items))
 
-export function toast(message, { duration = 2800 } = {}) {
+/**
+ * @param {string} message
+ * @param {{ duration?: number, action?: { label: string, run: () => void } }} [options]
+ *   action: one button beside the message ("Undo"). A toast with an action stays longer,
+ *   because it asks for a decision the person may want to make.
+ */
+export function toast(message, { duration, action } = {}) {
   const id = ++seq
-  items = [...items, { id, message }]
+  items = [...items, { id, message, action: action ?? null }]
+  duration = duration ?? (action ? 6000 : 2800)
   emit()
   setTimeout(() => dismissToast(id), duration)
   return id
